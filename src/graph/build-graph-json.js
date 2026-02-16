@@ -119,11 +119,13 @@ export function buildRuntimeInputs(graphResources) {
 export function buildExpectedOutputs(graphResources) {
   const outputs = {};
   for (const [name, output] of Object.entries(graphResources.expectedOutputs ?? {})) {
+    const data = Array.isArray(output.data) ? output.data : [output.data];
     outputs[name] = {
       descriptor: {
         dataType: output.descriptor.dataType,
         shape: output.descriptor.shape
-      }
+      },
+      data: data.map((v) => (typeof v === 'bigint' ? v.toString() : v))
     };
   }
   return outputs;

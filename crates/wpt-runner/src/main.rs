@@ -39,6 +39,8 @@ struct InputTensor {
 #[derive(Debug, Deserialize)]
 struct ExpectedOutput {
     descriptor: TensorDescriptor,
+    #[serde(default)]
+    data: Vec<Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -124,43 +126,84 @@ fn parse_f32(v: &Value) -> Result<f32, RunnerError> {
     Err(RunnerError::BadRequest(format!("invalid float value: {v}")))
 }
 
+fn shape_element_count(shape: &[usize]) -> Result<usize, RunnerError> {
+    let mut count = 1usize;
+    for &dim in shape {
+        count = count.checked_mul(dim).ok_or_else(|| {
+            RunnerError::BadRequest(format!("shape element count overflow for shape {:?}", shape))
+        })?;
+    }
+    Ok(count.max(1))
+}
+
+fn normalize_input_values(
+    descriptor: &TensorDescriptor,
+    data: &[Value],
+) -> Result<Vec<Value>, RunnerError> {
+    let expected = shape_element_count(&descriptor.shape)?;
+    let actual = data.len();
+
+    if actual == expected {
+        return Ok(data.to_vec());
+    }
+    if actual == 1 && expected > 1 {
+        return Ok(vec![data[0].clone(); expected]);
+    }
+
+    Err(RunnerError::BadRequest(format!(
+        "input data length mismatch: expected {} values for shape {:?}, got {}",
+        expected, descriptor.shape, actual
+    )))
+}
+
 fn to_tensor_data(descriptor: &TensorDescriptor, data: &[Value]) -> Result<TensorData, RunnerError> {
+    let normalized = normalize_input_values(descriptor, data)?;
     match descriptor.data_type.as_str() {
         "float32" => Ok(TensorData::Float32(
-            data.iter().map(parse_f32).collect::<Result<Vec<_>, _>>()?,
+            normalized.iter().map(parse_f32).collect::<Result<Vec<_>, _>>()?,
         )),
         "float16" => {
-            let bits = data
+            let bits = normalized
                 .iter()
                 .map(|v| Ok(f16::from_f32(parse_f32(v)?).to_bits()))
                 .collect::<Result<Vec<u16>, RunnerError>>()?;
             Ok(TensorData::Float16(bits))
         }
         "int8" => Ok(TensorData::Int8(
-            data.iter()
+            normalized
+                .iter()
                 .map(|v| parse_i64(v).map(|x| x as i8))
                 .collect::<Result<Vec<_>, _>>()?,
         )),
         "uint8" | "uint4" => Ok(TensorData::Uint8(
-            data.iter()
+            normalized
+                .iter()
                 .map(|v| parse_u64(v).map(|x| x as u8))
                 .collect::<Result<Vec<_>, _>>()?,
         )),
         "int32" | "int4" => Ok(TensorData::Int32(
-            data.iter()
+            normalized
+                .iter()
                 .map(|v| parse_i64(v).map(|x| x as i32))
                 .collect::<Result<Vec<_>, _>>()?,
         )),
         "uint32" => Ok(TensorData::Uint32(
-            data.iter()
+            normalized
+                .iter()
                 .map(|v| parse_u64(v).map(|x| x as u32))
                 .collect::<Result<Vec<_>, _>>()?,
         )),
         "int64" => Ok(TensorData::Int64(
-            data.iter().map(parse_i64).collect::<Result<Vec<_>, _>>()?,
+            normalized
+                .iter()
+                .map(parse_i64)
+                .collect::<Result<Vec<_>, _>>()?,
         )),
         "uint64" => Ok(TensorData::Uint64(
-            data.iter().map(parse_u64).collect::<Result<Vec<_>, _>>()?,
+            normalized
+                .iter()
+                .map(parse_u64)
+                .collect::<Result<Vec<_>, _>>()?,
         )),
         other => Err(RunnerError::BadRequest(format!(
             "unsupported input dataType: {other}"
@@ -193,6 +236,13 @@ fn cast_output_data(data: &[f32], dtype: &str) -> Vec<Value> {
             .collect(),
         _ => data.iter().map(|x| Value::from(*x as f64)).collect(),
     }
+}
+
+fn cast_output_data_compact(data: &[f32], dtype: &str, expected_len: usize) -> Vec<Value> {
+    if expected_len == 1 && !data.is_empty() {
+        return cast_output_data(&data[..1], dtype);
+    }
+    cast_output_data(data, dtype)
 }
 
 fn classify_graph_error(err: &GraphError) -> RunnerError {
@@ -263,7 +313,11 @@ fn execute_graph(
                         data_type: expected.descriptor.data_type.clone(),
                         shape: output.shape.clone(),
                     },
-                    data: cast_output_data(&output.data, &expected.descriptor.data_type),
+                    data: cast_output_data_compact(
+                        &output.data,
+                        &expected.descriptor.data_type,
+                        expected.data.len(),
+                    ),
                 },
             );
         }

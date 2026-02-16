@@ -56,10 +56,6 @@ export function renderConformanceHtmlReport(report) {
       ? '<tr><td colspan="4">No skipped tests in this file.</td></tr>'
       : skippedCases.map((c) => `<tr><td><a href="${escapeHtml(sourceUrl)}">${escapeHtml(c.testName)}</a></td><td>${escapeHtml(c.variant)}</td><td>${escapeHtml(c.reason ?? '')}</td><td>${c.durationMs ?? ''}</td></tr>`).join('\n');
 
-    const allCaseRows = cases.length === 0
-      ? '<tr><td colspan="6">No test cases captured.</td></tr>'
-      : cases.map((c) => `<tr><td>${escapeHtml(c.status)}</td><td><a href="${escapeHtml(sourceUrl)}">${escapeHtml(c.testName)}</a></td><td>${escapeHtml(c.variant)}</td><td>${escapeHtml(c.error ?? c.reason ?? '')}</td><td>${c.durationMs ?? ''}</td><td><a href="${escapeHtml(sourceUrl)}">file</a></td></tr>`).join('\n');
-
     return `
       <section class="file ${statusLabel}">
         <div class="file-head">
@@ -87,13 +83,6 @@ export function renderConformanceHtmlReport(report) {
             <tr><th>Test</th><th>Variant</th><th>Reason</th><th>Duration</th></tr>
           </thead>
           <tbody>${skippedRows}</tbody>
-        </table>
-        <h4>All Cases</h4>
-        <table>
-          <thead>
-            <tr><th>Status</th><th>Test</th><th>Variant</th><th>Detail</th><th>Duration</th><th>Source</th></tr>
-          </thead>
-          <tbody>${allCaseRows}</tbody>
         </table>
       </section>
     `;
