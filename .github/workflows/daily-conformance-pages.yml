@@ -17,6 +17,8 @@ concurrency:
 jobs:
   build-report:
     runs-on: ubuntu-latest
+    env:
+      ORT_VERSION: "1.23.2"
     steps:
       - name: Checkout main
         uses: actions/checkout@v4
@@ -46,9 +48,20 @@ jobs:
       - name: Update git dependencies to latest main
         run: cargo update -p rustnn -p webnn-graph
 
+      - name: Download ONNX Runtime shared libraries (Linux)
+        run: |
+          ORT_DIR="target/onnxruntime"
+          ORT_TARBALL="onnxruntime-linux-x64-${ORT_VERSION}.tgz"
+          ORT_BASE="https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}"
+          mkdir -p "$ORT_DIR"
+          if [ ! -d "$ORT_DIR/onnxruntime-linux-x64-${ORT_VERSION}/lib" ]; then
+            curl -L "${ORT_BASE}/${ORT_TARBALL}" -o "${ORT_DIR}/${ORT_TARBALL}"
+            tar -xzf "${ORT_DIR}/${ORT_TARBALL}" -C "$ORT_DIR"
+          fi
+          ls -la "$ORT_DIR/onnxruntime-linux-x64-${ORT_VERSION}/lib"
+
       - name: Build runner and set ONNX Runtime env (match rustnn Makefile)
         run: |
-          ORT_VERSION=1.23.2
           ORT_LIB_DIR="$PWD/target/onnxruntime/onnxruntime-linux-x64-${ORT_VERSION}/lib"
           ORT_DYLIB_FILE="$ORT_LIB_DIR/libonnxruntime.so.${ORT_VERSION}"
 
