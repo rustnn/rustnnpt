@@ -8,6 +8,10 @@ function normalizeOptionKey(opName, key) {
 }
 
 function normalizeValue(v) {
+  if (typeof v === 'number' && !Number.isFinite(v)) {
+    if (Number.isNaN(v)) return 'NaN';
+    return v > 0 ? 'Infinity' : '-Infinity';
+  }
   if (typeof v === 'bigint') return v.toString();
   if (Array.isArray(v)) return v.map(normalizeValue);
   if (v && typeof v === 'object') {
@@ -75,7 +79,16 @@ export function buildGraphJson(graphResources) {
     for (const arg of op.arguments ?? []) {
       for (const [key, value] of Object.entries(arg)) {
         if (key === 'options' && value && typeof value === 'object') {
-          Object.assign(options, normalizeOptions(value));
+          for (const [optKey, optValue] of Object.entries(value)) {
+            const optRefs = flattenInputReferences(optValue, operandNames);
+            if (optRefs.length > 0) {
+              inputs.push(...optRefs);
+              if (optKey === 'scale') options.hasScale = true;
+              if (optKey === 'bias') options.hasBias = true;
+              continue;
+            }
+            options[normalizeOptionKey(op.name, optKey)] = normalizeValue(optValue);
+          }
           continue;
         }
 
@@ -90,6 +103,11 @@ export function buildGraphJson(graphResources) {
     }
 
     const outputs = Array.isArray(op.outputs) ? op.outputs : [op.outputs];
+    for (const out of outputs) {
+      if (typeof out === 'string' && out.length > 0) {
+        operandNames.add(out);
+      }
+    }
 
     graph.nodes.push({
       id: `op_${index}`,
@@ -116,7 +134,7 @@ export function buildRuntimeInputs(graphResources) {
         dataType: input.descriptor.dataType,
         shape: input.descriptor.shape
       },
-      data: data.map((v) => (typeof v === 'bigint' ? v.toString() : v))
+      data: data.map(normalizeValue)
     };
   }
   return inputs;
@@ -131,7 +149,7 @@ export function buildExpectedOutputs(graphResources) {
         dataType: output.descriptor.dataType,
         shape: output.descriptor.shape
       },
-      data: data.map((v) => (typeof v === 'bigint' ? v.toString() : v))
+      data: data.map(normalizeValue)
     };
   }
   return outputs;
