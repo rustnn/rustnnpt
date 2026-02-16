@@ -53,9 +53,9 @@ export function renderConformanceHtmlReport(report) {
         <h4>Failures</h4>
         <table>
           <thead>
-            <tr><th>Test</th><th>Variant</th><th>Error</th><th>Duration</th></tr>
+            <tr><th>Test</th><th>Variant</th><th>Error</th></tr>
           </thead>
-          <tbody>${failedCases.map((c) => `<tr><td><a href="${escapeHtml(sourceUrl)}">${escapeHtml(c.testName)}</a></td><td>${escapeHtml(c.variant)}</td><td>${escapeHtml(c.error ?? '')}</td><td>${c.durationMs ?? ''}</td></tr>`).join('\n')}</tbody>
+          <tbody>${failedCases.map((c) => `<tr><td>${escapeHtml(c.testName)}</td><td>${escapeHtml(c.variant)}</td><td>${escapeHtml(c.error ?? '')}</td></tr>`).join('\n')}</tbody>
         </table>
       `
       : '';
@@ -65,9 +65,9 @@ export function renderConformanceHtmlReport(report) {
         <h4>Skipped</h4>
         <table>
           <thead>
-            <tr><th>Test</th><th>Variant</th><th>Reason</th><th>Duration</th></tr>
+            <tr><th>Test</th><th>Variant</th><th>Reason</th></tr>
           </thead>
-          <tbody>${skippedCases.map((c) => `<tr><td><a href="${escapeHtml(sourceUrl)}">${escapeHtml(c.testName)}</a></td><td>${escapeHtml(c.variant)}</td><td>${escapeHtml(c.reason ?? '')}</td><td>${c.durationMs ?? ''}</td></tr>`).join('\n')}</tbody>
+          <tbody>${skippedCases.map((c) => `<tr><td><a href="${escapeHtml(sourceUrl)}">${escapeHtml(c.testName)}</a></td><td>${escapeHtml(c.variant)}</td><td>${escapeHtml(c.reason ?? '')}</td></tr>`).join('\n')}</tbody>
         </table>
       `
       : '';
@@ -76,12 +76,11 @@ export function renderConformanceHtmlReport(report) {
       <section class="file ${statusLabel}">
         <div class="file-head">
           <h3><a href="${escapeHtml(sourceUrl)}">${escapeHtml(file.fileName)}</a></h3>
-          <div class="pill ${statusLabel}">${statusLabel}</div>
-        </div>
-        <div class="file-summary">
-          <span>passed: ${file.summary.passed}</span>
-          <span>failed: ${file.summary.failed}</span>
-          <span>skipped: ${file.summary.skipped}</span>
+          <div class="head-metrics">
+            <span class="metric passed">${file.summary.passed} passed</span>
+            ${file.summary.failed > 0 ? `<span class="metric failed">${file.summary.failed} failed</span>` : ''}
+            ${file.summary.skipped > 0 ? `<span class="metric skipped">${file.summary.skipped} skipped</span>` : ''}
+          </div>
         </div>
         ${parseErrorBanner}
         ${failedSection}
@@ -172,23 +171,25 @@ export function renderConformanceHtmlReport(report) {
         text-decoration: none;
       }
       h3 a:hover { text-decoration: underline; }
-      .pill {
+      .head-metrics {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .metric {
         border-radius: 999px;
-        padding: 4px 9px;
+        padding: 4px 10px;
         font-size: 12px;
         font-weight: 700;
-        text-transform: uppercase;
+        white-space: nowrap;
       }
-      .pill.passing { background: #d9f7e8; color: var(--ok); }
-      .pill.failing { background: #ffe2dc; color: var(--bad); }
-      .file-summary {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-        margin-bottom: 12px;
-      }
+      .metric.passed { background: #d9f7e8; color: var(--ok); }
+      .metric.failed { background: #ffe2dc; color: var(--bad); }
+      .metric.skipped { background: #fff0d1; color: var(--skip); }
       .file-error {
-        margin: 0 0 12px;
+        margin: 10px 0 12px;
         padding: 8px 10px;
         border-radius: 8px;
         border: 1px solid #f5c2c7;
