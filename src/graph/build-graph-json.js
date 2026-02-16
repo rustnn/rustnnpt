@@ -2,6 +2,11 @@ function normalizeOpName(name) {
   return name;
 }
 
+function normalizeOptionKey(opName, key) {
+  if (opName === 'cast' && key === 'type') return 'to';
+  return key;
+}
+
 function normalizeValue(v) {
   if (typeof v === 'bigint') return v.toString();
   if (Array.isArray(v)) return v.map(normalizeValue);
@@ -13,12 +18,12 @@ function normalizeValue(v) {
   return v;
 }
 
-function flattenInputReferences(argumentValue) {
+function flattenInputReferences(argumentValue, operandNames) {
   if (typeof argumentValue === 'string') {
-    return [argumentValue];
+    return operandNames.has(argumentValue) ? [argumentValue] : [];
   }
   if (Array.isArray(argumentValue) && argumentValue.every((x) => typeof x === 'string')) {
-    return argumentValue;
+    return argumentValue.every((x) => operandNames.has(x)) ? argumentValue : [];
   }
   return [];
 }
@@ -36,6 +41,7 @@ function normalizeOptions(optionsObj) {
 }
 
 export function buildGraphJson(graphResources) {
+  const operandNames = new Set(Object.keys(graphResources.inputs ?? {}));
   const graph = {
     format: 'webnn-graph-json',
     version: 2,
@@ -73,13 +79,13 @@ export function buildGraphJson(graphResources) {
           continue;
         }
 
-        const refs = flattenInputReferences(value);
+        const refs = flattenInputReferences(value, operandNames);
         if (refs.length > 0) {
           inputs.push(...refs);
           continue;
         }
 
-        options[key] = normalizeValue(value);
+        options[normalizeOptionKey(op.name, key)] = normalizeValue(value);
       }
     }
 
