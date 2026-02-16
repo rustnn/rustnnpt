@@ -46,6 +46,19 @@ jobs:
       - name: Update git dependencies to latest main
         run: cargo update -p rustnn -p webnn-graph
 
+      - name: Build runner and resolve ONNX Runtime library path
+        run: |
+          npm run build:runner
+          ORT_SO="$(find target -type f -name 'libonnxruntime.so' | head -n 1)"
+          if [ -z "$ORT_SO" ]; then
+            echo "Could not locate libonnxruntime.so under target/" >&2
+            exit 1
+          fi
+          ORT_DIR="$(dirname "$ORT_SO")"
+          echo "Found ONNX Runtime at: $ORT_SO"
+          echo "LD_LIBRARY_PATH=$ORT_DIR:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+          echo "ORT_DYLIB_PATH=$ORT_SO" >> "$GITHUB_ENV"
+
       - name: Generate conformance report
         run: |
           npm run test:wpt:report -- --variants cpu,gpu,npu --exit-zero || true
