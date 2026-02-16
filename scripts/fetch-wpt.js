@@ -26,8 +26,8 @@ if (!existsSync(wptDir)) {
   await run('git', ['clone', '--depth', '1', repo, wptDir]);
 } else {
   console.log(`Updating WPT in ${wptDir}...`);
-  await run('git', ['fetch', '--depth', '1', 'origin', 'master'], wptDir);
-  await run('git', ['reset', '--hard', 'origin/master'], wptDir);
+  await run('git', ['fetch', '--depth', '1', 'origin', 'main'], wptDir);
+  await run('git', ['reset', '--hard', 'origin/main'], wptDir);
 }
 
 console.log('WPT ready.');

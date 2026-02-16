@@ -31,6 +31,9 @@ export function renderConformanceHtmlReport(report) {
     const failedCases = cases.filter((c) => c.status === 'fail');
     const skippedCases = cases.filter((c) => c.status === 'skip');
     const statusLabel = file.summary.failed > 0 ? 'failing' : 'passing';
+    const parseErrorBanner = file.fileError
+      ? `<p class="file-error">File parse error: ${escapeHtml(file.fileError)}</p>`
+      : '';
 
     const failedRows = failedCases.length === 0
       ? '<tr><td colspan="4">No failures in this file.</td></tr>'
@@ -52,6 +55,7 @@ export function renderConformanceHtmlReport(report) {
           <span>failed: ${file.summary.failed}</span>
           <span>skipped: ${file.summary.skipped}</span>
         </div>
+        ${parseErrorBanner}
         <h4>Failures</h4>
         <table>
           <thead>
@@ -165,6 +169,15 @@ export function renderConformanceHtmlReport(report) {
         flex-wrap: wrap;
         gap: 10px;
         margin-bottom: 12px;
+      }
+      .file-error {
+        margin: 0 0 12px;
+        padding: 8px 10px;
+        border-radius: 8px;
+        border: 1px solid #f5c2c7;
+        background: #fff0f1;
+        color: #9f1239;
+        font-size: 13px;
       }
       h4 {
         margin: 12px 0 8px;

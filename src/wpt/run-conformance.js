@@ -20,7 +20,8 @@ function parseArgs(argv) {
     variants: ['cpu'],
     stopOnFail: false,
     reportJson: null,
-    reportHtml: null
+    reportHtml: null,
+    exitZero: false
   };
 
   for (let i = 2; i < argv.length; i += 1) {
@@ -34,8 +35,9 @@ function parseArgs(argv) {
     else if (arg === '--stop-on-fail') opts.stopOnFail = true;
     else if (arg === '--report-json') opts.reportJson = argv[++i];
     else if (arg === '--report-html') opts.reportHtml = argv[++i];
+    else if (arg === '--exit-zero') opts.exitZero = true;
     else if (arg === '--help') {
-      console.log('Usage: node src/wpt/run-conformance.js [--wpt-dir PATH] [--op NAME] [--file FILE] [--limit-tests N] [--limit-files N] [--variants cpu,gpu,npu] [--stop-on-fail] [--report-json PATH] [--report-html PATH]');
+      console.log('Usage: node src/wpt/run-conformance.js [--wpt-dir PATH] [--op NAME] [--file FILE] [--limit-tests N] [--limit-files N] [--variants cpu,gpu,npu] [--stop-on-fail] [--report-json PATH] [--report-html PATH] [--exit-zero]');
       process.exit(0);
     }
   }
@@ -114,7 +116,8 @@ function serializeOptions(opts) {
     variants: opts.variants,
     stopOnFail: opts.stopOnFail,
     reportJson: opts.reportJson,
-    reportHtml: opts.reportHtml
+    reportHtml: opts.reportHtml,
+    exitZero: opts.exitZero
   };
 }
 
@@ -168,32 +171,63 @@ async function main() {
     failures
   };
   let halted = false;
+  let fatalError = null;
 
   try {
     for (const file of files) {
-      const source = await readFile(file, 'utf8');
-      const tests = extractTestsFromSource(source, file).slice(0, opts.limitTests);
       const fileReport = {
         filePath: file,
         fileName: path.basename(file),
-        selectedTests: tests.length,
+        selectedTests: 0,
         summary: { passed: 0, failed: 0, skipped: 0 },
-        cases: []
+        cases: [],
+        fileError: null
       };
       report.files.push(fileReport);
+      let tests = [];
+
+      try {
+        const source = await readFile(file, 'utf8');
+        tests = extractTestsFromSource(source, file).slice(0, opts.limitTests);
+      } catch (err) {
+        fileReport.fileError = err.message;
+        failures.push(`${fileReport.fileName} :: FILE_PARSE :: ${err.message}`);
+        failed += 1;
+        fileReport.summary.failed += 1;
+        console.log(`\n[FILE] ${fileReport.fileName} (parse error)`);
+        console.log(`  - FAIL file parse: ${err.message}`);
+        continue;
+      }
+
+      fileReport.selectedTests = tests.length;
       console.log(`\n[FILE] ${fileReport.fileName} (${tests.length} tests)`);
 
       for (const variant of opts.variants) {
         console.log(`[VARIANT] ${variant} -> cpu-backed runner`);
-        for (const test of tests) {
+        for (let testIndex = 0; testIndex < tests.length; testIndex += 1) {
+          const test = tests[testIndex];
+          const testName = test?.name ?? `[unnamed-${testIndex}]`;
           const started = Date.now();
+          if (!test || typeof test !== 'object' || !test.graph) {
+            skipped += 1;
+            fileReport.summary.skipped += 1;
+            fileReport.cases.push({
+              testName,
+              variant,
+              status: 'skip',
+              reason: 'invalid extracted test case',
+              durationMs: 0
+            });
+            console.log(`  - SKIP ${testName}: invalid extracted test case`);
+            continue;
+          }
           try {
             const res = await runSingleTest({ runner, test, variant });
             if (res.status === 'pass') {
               passed += 1;
               fileReport.summary.passed += 1;
               fileReport.cases.push({
-                testName: test.name,
+                testName,
                 variant,
                 status: 'pass',
                 durationMs: Date.now() - started
@@ -202,27 +236,27 @@ async function main() {
               skipped += 1;
               fileReport.summary.skipped += 1;
               fileReport.cases.push({
-                testName: test.name,
+                testName,
                 variant,
                 status: 'skip',
                 reason: res.reason,
                 durationMs: Date.now() - started
               });
-              console.log(`  - SKIP ${test.name}: ${res.reason}`);
+              console.log(`  - SKIP ${testName}: ${res.reason}`);
             }
           } catch (err) {
             failed += 1;
             fileReport.summary.failed += 1;
-            const msg = `${path.basename(file)} :: ${variant} :: ${test.name} :: ${err.message}`;
+            const msg = `${path.basename(file)} :: ${variant} :: ${testName} :: ${err.message}`;
             failures.push(msg);
             fileReport.cases.push({
-              testName: test.name,
+              testName,
               variant,
               status: 'fail',
               error: err.message,
               durationMs: Date.now() - started
             });
-            console.log(`  - FAIL ${test.name}`);
+            console.log(`  - FAIL ${testName}`);
             if (opts.stopOnFail) {
               halted = true;
               break;
@@ -233,6 +267,10 @@ async function main() {
       }
       if (halted) break;
     }
+  } catch (err) {
+    fatalError = err;
+    failed += 1;
+    failures.push(`FATAL :: ${err.message}`);
   } finally {
     await runner.close();
   }
@@ -253,6 +291,9 @@ async function main() {
   if (halted) {
     console.log('\nRun halted early due to --stop-on-fail.');
   }
+  if (fatalError) {
+    console.log(`\nFatal error: ${fatalError.message}`);
+  }
 
   if (opts.reportJson) {
     await writeReportFile(opts.reportJson, `${JSON.stringify(report, null, 2)}\n`);
@@ -263,7 +304,7 @@ async function main() {
     console.log(`HTML report written: ${opts.reportHtml}`);
   }
 
-  process.exit(failed > 0 ? 1 : 0);
+  process.exit((failed > 0 || fatalError) && !opts.exitZero ? 1 : 0);
 }
 
 main().catch((err) => {
