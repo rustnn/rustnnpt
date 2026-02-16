@@ -64,8 +64,6 @@ const UNIMPLEMENTED_OPS = new Set([
   'is_infinite',
   'is_nan',
   'l2_pool2d',
-  'linear',
-  'not_equal',
   'resample2d',
   'reverse',
   'round_even',
