@@ -73,13 +73,15 @@ export function renderConformanceHtmlReport(report) {
 
     const skippedSection = skippedCases.length > 0
       ? `
-        <h4>Skipped</h4>
-        <table>
-          <thead>
-            <tr><th>Test</th><th>Variant</th><th>Reason</th></tr>
-          </thead>
-          <tbody>${skippedCases.map((c) => `<tr><td><a href="${escapeHtml(sourceUrl)}">${escapeHtml(c.testName)}</a></td><td>${escapeHtml(c.variant)}</td><td>${escapeHtml(c.reason ?? '')}</td></tr>`).join('\n')}</tbody>
-        </table>
+        <details class="collapsible skipped">
+          <summary>Skipped (${skippedCases.length})</summary>
+          <table>
+            <thead>
+              <tr><th>Test</th><th>Variant</th><th>Reason</th></tr>
+            </thead>
+            <tbody>${skippedCases.map((c) => `<tr><td><a href="${escapeHtml(sourceUrl)}">${escapeHtml(c.testName)}</a></td><td>${escapeHtml(c.variant)}</td><td>${escapeHtml(c.reason ?? '')}</td></tr>`).join('\n')}</tbody>
+          </table>
+        </details>
       `
       : '';
 
