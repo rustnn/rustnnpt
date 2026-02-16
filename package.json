@@ -1,0 +1,17 @@
+{
+  "name": "rustnnpt",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Thin JavaScript WebNN shim on top of RustNN for upstream WPT conformance testing",
+  "scripts": {
+    "test:wpt:fetch": "node scripts/fetch-wpt.js",
+    "test:wpt:run": "node src/wpt/run-conformance.js",
+    "test:wpt:report": "node src/wpt/run-conformance.js --report-json reports/conformance.json --report-html reports/conformance.html",
+    "build:runner": "cargo build --manifest-path crates/wpt-runner/Cargo.toml",
+    "check:runner": "cargo check --manifest-path crates/wpt-runner/Cargo.toml"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/wpt-runner"]
+resolver = "2"

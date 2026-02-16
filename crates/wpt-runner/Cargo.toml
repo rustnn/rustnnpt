@@ -1,0 +1,13 @@
+[package]
+name = "wpt-runner"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rustnn = { path = "../../../rustnn", features = ["onnx-runtime"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+half = "2"
+base64 = "0.22"
+webnn-graph = { git = "https://github.com/rustnn/webnn-graph", branch = "tarek-flexible-input" }
