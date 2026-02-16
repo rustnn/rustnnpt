@@ -19,6 +19,10 @@ function durationMs(startedAt, endedAt) {
   return `${((end - start) / 1000).toFixed(2)}s`;
 }
 
+function wptSourceUrl(fileName) {
+  return `https://github.com/web-platform-tests/wpt/blob/main/webnn/conformance_tests/${encodeURIComponent(fileName)}`;
+}
+
 export function renderConformanceHtmlReport(report) {
   const passed = report.summary.passed ?? 0;
   const failed = report.summary.failed ?? 0;
@@ -38,6 +42,7 @@ export function renderConformanceHtmlReport(report) {
     const cases = file.cases ?? [];
     const failedCases = cases.filter((c) => c.status === 'fail');
     const skippedCases = cases.filter((c) => c.status === 'skip');
+    const sourceUrl = wptSourceUrl(file.fileName);
     const statusLabel = file.summary.failed > 0 ? 'failing' : 'passing';
     const parseErrorBanner = file.fileError
       ? `<p class="file-error">File parse error: ${escapeHtml(file.fileError)}</p>`
@@ -45,11 +50,15 @@ export function renderConformanceHtmlReport(report) {
 
     const failedRows = failedCases.length === 0
       ? '<tr><td colspan="4">No failures in this file.</td></tr>'
-      : failedCases.map((c) => `<tr><td>${escapeHtml(c.testName)}</td><td>${escapeHtml(c.variant)}</td><td>${escapeHtml(c.error ?? '')}</td><td>${c.durationMs ?? ''}</td></tr>`).join('\n');
+      : failedCases.map((c) => `<tr><td><a href="${escapeHtml(sourceUrl)}">${escapeHtml(c.testName)}</a></td><td>${escapeHtml(c.variant)}</td><td>${escapeHtml(c.error ?? '')}</td><td>${c.durationMs ?? ''}</td></tr>`).join('\n');
 
     const skippedRows = skippedCases.length === 0
       ? '<tr><td colspan="4">No skipped tests in this file.</td></tr>'
-      : skippedCases.map((c) => `<tr><td>${escapeHtml(c.testName)}</td><td>${escapeHtml(c.variant)}</td><td>${escapeHtml(c.reason ?? '')}</td><td>${c.durationMs ?? ''}</td></tr>`).join('\n');
+      : skippedCases.map((c) => `<tr><td><a href="${escapeHtml(sourceUrl)}">${escapeHtml(c.testName)}</a></td><td>${escapeHtml(c.variant)}</td><td>${escapeHtml(c.reason ?? '')}</td><td>${c.durationMs ?? ''}</td></tr>`).join('\n');
+
+    const allCaseRows = cases.length === 0
+      ? '<tr><td colspan="6">No test cases captured.</td></tr>'
+      : cases.map((c) => `<tr><td>${escapeHtml(c.status)}</td><td><a href="${escapeHtml(sourceUrl)}">${escapeHtml(c.testName)}</a></td><td>${escapeHtml(c.variant)}</td><td>${escapeHtml(c.error ?? c.reason ?? '')}</td><td>${c.durationMs ?? ''}</td><td><a href="${escapeHtml(sourceUrl)}">file</a></td></tr>`).join('\n');
 
     return `
       <section class="file ${statusLabel}">
@@ -58,6 +67,7 @@ export function renderConformanceHtmlReport(report) {
           <div class="pill ${statusLabel}">${statusLabel}</div>
         </div>
         <p class="meta">${escapeHtml(file.filePath)}</p>
+        <p class="meta"><a href="${escapeHtml(sourceUrl)}">WPT source file</a></p>
         <div class="file-summary">
           <span>passed: ${file.summary.passed}</span>
           <span>failed: ${file.summary.failed}</span>
@@ -77,6 +87,13 @@ export function renderConformanceHtmlReport(report) {
             <tr><th>Test</th><th>Variant</th><th>Reason</th><th>Duration</th></tr>
           </thead>
           <tbody>${skippedRows}</tbody>
+        </table>
+        <h4>All Cases</h4>
+        <table>
+          <thead>
+            <tr><th>Status</th><th>Test</th><th>Variant</th><th>Detail</th><th>Duration</th><th>Source</th></tr>
+          </thead>
+          <tbody>${allCaseRows}</tbody>
         </table>
       </section>
     `;
