@@ -20,7 +20,7 @@ function durationMs(startedAt, endedAt) {
 }
 
 function wptSourceUrl(fileName) {
-  return `https://github.com/web-platform-tests/wpt/blob/main/webnn/conformance_tests/${encodeURIComponent(fileName)}`;
+  return `https://github.com/web-platform-tests/wpt/blob/master/webnn/conformance_tests/${encodeURIComponent(fileName)}`;
 }
 
 export function renderConformanceHtmlReport(report) {
