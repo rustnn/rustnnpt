@@ -46,18 +46,29 @@ jobs:
       - name: Update git dependencies to latest main
         run: cargo update -p rustnn -p webnn-graph
 
-      - name: Build runner and resolve ONNX Runtime library path
+      - name: Build runner and set ONNX Runtime env (match rustnn Makefile)
         run: |
+          ORT_VERSION=1.23.2
+          ORT_LIB_DIR="$PWD/target/onnxruntime/onnxruntime-linux-x64-${ORT_VERSION}/lib"
+          ORT_DYLIB_FILE="$ORT_LIB_DIR/libonnxruntime.so.${ORT_VERSION}"
+
           npm run build:runner
-          ORT_SO="$(find target -type f -name 'libonnxruntime.so' | head -n 1)"
-          if [ -z "$ORT_SO" ]; then
-            echo "Could not locate libonnxruntime.so under target/" >&2
+
+          if [ ! -d "$ORT_LIB_DIR" ]; then
+            echo "ORT lib dir not found: $ORT_LIB_DIR" >&2
+            find target/onnxruntime -maxdepth 4 -type d 2>/dev/null || true
             exit 1
           fi
-          ORT_DIR="$(dirname "$ORT_SO")"
-          echo "Found ONNX Runtime at: $ORT_SO"
-          echo "LD_LIBRARY_PATH=$ORT_DIR:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
-          echo "ORT_DYLIB_PATH=$ORT_SO" >> "$GITHUB_ENV"
+          if [ ! -f "$ORT_DYLIB_FILE" ]; then
+            echo "ORT dylib file not found: $ORT_DYLIB_FILE" >&2
+            find "$ORT_LIB_DIR" -maxdepth 1 -type f -name 'libonnxruntime.so*' || true
+            exit 1
+          fi
+
+          echo "Using ORT lib dir: $ORT_LIB_DIR"
+          echo "Using ORT dylib: $ORT_DYLIB_FILE"
+          echo "LD_LIBRARY_PATH=$ORT_LIB_DIR:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+          echo "ORT_DYLIB_PATH=$ORT_DYLIB_FILE" >> "$GITHUB_ENV"
 
       - name: Generate conformance report
         run: |
