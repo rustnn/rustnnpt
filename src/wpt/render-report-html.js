@@ -48,42 +48,44 @@ export function renderConformanceHtmlReport(report) {
       ? `<p class="file-error">File parse error: ${escapeHtml(file.fileError)}</p>`
       : '';
 
-    const failedRows = failedCases.length === 0
-      ? '<tr><td colspan="4">No failures in this file.</td></tr>'
-      : failedCases.map((c) => `<tr><td><a href="${escapeHtml(sourceUrl)}">${escapeHtml(c.testName)}</a></td><td>${escapeHtml(c.variant)}</td><td>${escapeHtml(c.error ?? '')}</td><td>${c.durationMs ?? ''}</td></tr>`).join('\n');
+    const failedSection = failedCases.length > 0
+      ? `
+        <h4>Failures</h4>
+        <table>
+          <thead>
+            <tr><th>Test</th><th>Variant</th><th>Error</th><th>Duration</th></tr>
+          </thead>
+          <tbody>${failedCases.map((c) => `<tr><td><a href="${escapeHtml(sourceUrl)}">${escapeHtml(c.testName)}</a></td><td>${escapeHtml(c.variant)}</td><td>${escapeHtml(c.error ?? '')}</td><td>${c.durationMs ?? ''}</td></tr>`).join('\n')}</tbody>
+        </table>
+      `
+      : '';
 
-    const skippedRows = skippedCases.length === 0
-      ? '<tr><td colspan="4">No skipped tests in this file.</td></tr>'
-      : skippedCases.map((c) => `<tr><td><a href="${escapeHtml(sourceUrl)}">${escapeHtml(c.testName)}</a></td><td>${escapeHtml(c.variant)}</td><td>${escapeHtml(c.reason ?? '')}</td><td>${c.durationMs ?? ''}</td></tr>`).join('\n');
+    const skippedSection = skippedCases.length > 0
+      ? `
+        <h4>Skipped</h4>
+        <table>
+          <thead>
+            <tr><th>Test</th><th>Variant</th><th>Reason</th><th>Duration</th></tr>
+          </thead>
+          <tbody>${skippedCases.map((c) => `<tr><td><a href="${escapeHtml(sourceUrl)}">${escapeHtml(c.testName)}</a></td><td>${escapeHtml(c.variant)}</td><td>${escapeHtml(c.reason ?? '')}</td><td>${c.durationMs ?? ''}</td></tr>`).join('\n')}</tbody>
+        </table>
+      `
+      : '';
 
     return `
       <section class="file ${statusLabel}">
         <div class="file-head">
-          <h3>${escapeHtml(file.fileName)}</h3>
+          <h3><a href="${escapeHtml(sourceUrl)}">${escapeHtml(file.fileName)}</a></h3>
           <div class="pill ${statusLabel}">${statusLabel}</div>
         </div>
-        <p class="meta">${escapeHtml(file.filePath)}</p>
-        <p class="meta"><a href="${escapeHtml(sourceUrl)}">WPT source file</a></p>
         <div class="file-summary">
           <span>passed: ${file.summary.passed}</span>
           <span>failed: ${file.summary.failed}</span>
           <span>skipped: ${file.summary.skipped}</span>
         </div>
         ${parseErrorBanner}
-        <h4>Failures</h4>
-        <table>
-          <thead>
-            <tr><th>Test</th><th>Variant</th><th>Error</th><th>Duration</th></tr>
-          </thead>
-          <tbody>${failedRows}</tbody>
-        </table>
-        <h4>Skipped</h4>
-        <table>
-          <thead>
-            <tr><th>Test</th><th>Variant</th><th>Reason</th><th>Duration</th></tr>
-          </thead>
-          <tbody>${skippedRows}</tbody>
-        </table>
+        ${failedSection}
+        ${skippedSection}
       </section>
     `;
   }).join('\n');
@@ -165,6 +167,11 @@ export function renderConformanceHtmlReport(report) {
         gap: 12px;
       }
       h3 { margin: 0; }
+      h3 a {
+        color: inherit;
+        text-decoration: none;
+      }
+      h3 a:hover { text-decoration: underline; }
       .pill {
         border-radius: 999px;
         padding: 4px 9px;
@@ -174,12 +181,6 @@ export function renderConformanceHtmlReport(report) {
       }
       .pill.passing { background: #d9f7e8; color: var(--ok); }
       .pill.failing { background: #ffe2dc; color: var(--bad); }
-      .meta {
-        margin: 8px 0;
-        color: var(--muted);
-        font-size: 13px;
-        word-break: break-all;
-      }
       .file-summary {
         display: flex;
         flex-wrap: wrap;

@@ -183,7 +183,6 @@ async function main() {
   try {
     for (const file of files) {
       const fileReport = {
-        filePath: file,
         fileName: path.basename(file),
         selectedTests: 0,
         summary: { passed: 0, failed: 0, skipped: 0 },
@@ -195,7 +194,7 @@ async function main() {
 
       try {
         const source = await readFile(file, 'utf8');
-        tests = extractTestsFromSource(source, file).slice(0, opts.limitTests);
+        tests = extractTestsFromSource(source, path.basename(file)).slice(0, opts.limitTests);
       } catch (err) {
         fileReport.fileError = err.message;
         failures.push(`${fileReport.fileName} :: FILE_PARSE :: ${err.message}`);
