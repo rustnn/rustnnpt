@@ -279,9 +279,15 @@ async function main() {
   report.summary.passed = passed;
   report.summary.failed = failed;
   report.summary.skipped = skipped;
+  report.summary.total = passed + failed + skipped;
+  const denomWithoutSkips = passed + failed;
+  const passRate = report.summary.total > 0 ? (passed / report.summary.total) * 100 : 0;
+  const passRateExcludingSkips = denomWithoutSkips > 0 ? (passed / denomWithoutSkips) * 100 : 0;
+  report.summary.passRatePct = Number(passRate.toFixed(1));
+  report.summary.passRateExcludingSkipsPct = Number(passRateExcludingSkips.toFixed(1));
 
   console.log('\n=== SUMMARY ===');
-  console.log(`passed=${passed} failed=${failed} skipped=${skipped}`);
+  console.log(`passed=${passed} failed=${failed} skipped=${skipped} passRate=${report.summary.passRatePct}%`);
   if (failures.length > 0) {
     console.log('\nFirst failures:');
     for (const line of failures.slice(0, 20)) {
