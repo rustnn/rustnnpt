@@ -43,20 +43,24 @@ export function renderConformanceHtmlReport(report) {
     const failedCases = cases.filter((c) => c.status === 'fail');
     const skippedCases = cases.filter((c) => c.status === 'skip');
     const sourceUrl = wptSourceUrl(file.fileName);
-    const statusLabel = file.summary.failed > 0 ? 'failing' : 'passing';
+    const statusLabel = file.summary.failed > 0
+      ? 'failing'
+      : (file.summary.skipped > 0 ? 'skipped' : 'passing');
     const parseErrorBanner = file.fileError
       ? `<p class="file-error">File parse error: ${escapeHtml(file.fileError)}</p>`
       : '';
 
     const failedSection = failedCases.length > 0
       ? `
-        <h4>Failures</h4>
-        <table>
-          <thead>
-            <tr><th>Test</th><th>Variant</th><th>Error</th></tr>
-          </thead>
-          <tbody>${failedCases.map((c) => `<tr><td>${escapeHtml(c.testName)}</td><td>${escapeHtml(c.variant)}</td><td>${escapeHtml(c.error ?? '')}</td></tr>`).join('\n')}</tbody>
-        </table>
+        <details class="collapsible failures">
+          <summary>Failures (${failedCases.length})</summary>
+          <table>
+            <thead>
+              <tr><th>Test</th><th>Variant</th><th>Error</th></tr>
+            </thead>
+            <tbody>${failedCases.map((c) => `<tr><td>${escapeHtml(c.testName)}</td><td>${escapeHtml(c.variant)}</td><td>${escapeHtml(c.error ?? '')}</td></tr>`).join('\n')}</tbody>
+          </table>
+        </details>
       `
       : '';
 
@@ -159,6 +163,14 @@ export function renderConformanceHtmlReport(report) {
         border-radius: 12px;
         padding: 16px;
       }
+      .file.failing {
+        background: #fff3f1;
+        border-color: #f4c7c3;
+      }
+      .file.skipped {
+        background: #fff9ee;
+        border-color: #f0ddb5;
+      }
       .file-head {
         display: flex;
         align-items: center;
@@ -200,6 +212,15 @@ export function renderConformanceHtmlReport(report) {
       h4 {
         margin: 12px 0 8px;
         font-size: 14px;
+      }
+      .collapsible {
+        margin-top: 12px;
+      }
+      .collapsible summary {
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+        margin-bottom: 8px;
       }
       table {
         width: 100%;
