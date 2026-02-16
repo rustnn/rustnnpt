@@ -173,7 +173,7 @@ fn cast_output_data(data: &[f32], dtype: &str) -> Vec<Value> {
         "float32" => data.iter().map(|x| Value::from(*x as f64)).collect(),
         "float16" => data
             .iter()
-            .map(|x| Value::from(f16::from_f32(*x).to_bits() as u64))
+            .map(|x| Value::from(f16::from_f32(*x).to_f32() as f64))
             .collect(),
         "int8" => data.iter().map(|x| Value::from((*x as i8) as i64)).collect(),
         "uint8" | "uint4" => data.iter().map(|x| Value::from((*x as u8) as u64)).collect(),
