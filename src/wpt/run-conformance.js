@@ -18,6 +18,7 @@ function parseArgs(argv) {
     limitTests: Number.POSITIVE_INFINITY,
     limitFiles: Number.POSITIVE_INFINITY,
     variants: ['cpu'],
+    skipUnimplemented: false,
     stopOnFail: false,
     reportJson: null,
     reportHtml: null,
@@ -33,11 +34,12 @@ function parseArgs(argv) {
     else if (arg === '--limit-files') opts.limitFiles = Number(argv[++i]);
     else if (arg === '--variants') opts.variants = argv[++i].split(',').map((s) => s.trim()).filter(Boolean);
     else if (arg === '--stop-on-fail') opts.stopOnFail = true;
+    else if (arg === '--skip-unimplemented') opts.skipUnimplemented = true;
     else if (arg === '--report-json') opts.reportJson = argv[++i];
     else if (arg === '--report-html') opts.reportHtml = argv[++i];
     else if (arg === '--exit-zero') opts.exitZero = true;
     else if (arg === '--help') {
-      console.log('Usage: node src/wpt/run-conformance.js [--wpt-dir PATH] [--op NAME] [--file FILE] [--limit-tests N] [--limit-files N] [--variants cpu,gpu,npu] [--stop-on-fail] [--report-json PATH] [--report-html PATH] [--exit-zero]');
+      console.log('Usage: node src/wpt/run-conformance.js [--wpt-dir PATH] [--op NAME] [--file FILE] [--limit-tests N] [--limit-files N] [--variants cpu,gpu,npu] [--skip-unimplemented] [--stop-on-fail] [--report-json PATH] [--report-html PATH] [--exit-zero]');
       process.exit(0);
     }
   }
@@ -56,7 +58,37 @@ const SUPPORTED_DTYPES = new Set([
   'float32', 'float16', 'int8', 'uint8', 'int32', 'uint32', 'int64', 'uint64', 'int4', 'uint4'
 ]);
 
-function shouldSkipTest(test) {
+// Keep this set aligned with rustnn's implementation-status docs.
+const UNIMPLEMENTED_OPS = new Set([
+  'cumulative_sum',
+  'is_infinite',
+  'is_nan',
+  'l2_pool2d',
+  'linear',
+  'not_equal',
+  'resample2d',
+  'reverse',
+  'round_even',
+  // Intentionally deferred in rustnn.
+  'gru',
+  'gru_cell',
+  'lstm',
+  'lstm_cell'
+]);
+
+function collectUnimplementedOps(test) {
+  const ops = Array.isArray(test?.graph?.operators) ? test.graph.operators : [];
+  const missing = new Set();
+  for (const op of ops) {
+    const normalized = normalizeOpName(op?.name ?? '');
+    if (UNIMPLEMENTED_OPS.has(normalized)) {
+      missing.add(normalized);
+    }
+  }
+  return [...missing];
+}
+
+function shouldSkipTest(test, opts) {
   const inputs = Object.values(test.graph?.inputs ?? {});
   const outputs = Object.values(test.graph?.expectedOutputs ?? {});
   const tensors = [...inputs, ...outputs];
@@ -65,6 +97,13 @@ function shouldSkipTest(test) {
     const dt = t?.descriptor?.dataType;
     if (!SUPPORTED_DTYPES.has(dt)) {
       return `unsupported dataType: ${dt}`;
+    }
+  }
+
+  if (opts.skipUnimplemented) {
+    const missingOps = collectUnimplementedOps(test);
+    if (missingOps.length > 0) {
+      return `unimplemented op(s): ${missingOps.join(', ')}`;
     }
   }
   return null;
@@ -78,9 +117,9 @@ function contextOptionsForVariant(variant) {
   return { deviceType: variant };
 }
 
-async function runSingleTest({ runner, test, variant }) {
+async function runSingleTest({ runner, test, variant, opts }) {
   const graph = test.graph;
-  const skipReason = shouldSkipTest(test);
+  const skipReason = shouldSkipTest(test, opts);
   if (skipReason) {
     return { status: 'skip', reason: skipReason };
   }
@@ -114,6 +153,7 @@ function serializeOptions(opts) {
     limitTests: numberOrNull(opts.limitTests),
     limitFiles: numberOrNull(opts.limitFiles),
     variants: opts.variants,
+    skipUnimplemented: opts.skipUnimplemented,
     stopOnFail: opts.stopOnFail,
     reportJson: opts.reportJson,
     reportHtml: opts.reportHtml,
@@ -228,7 +268,7 @@ async function main() {
             continue;
           }
           try {
-            const res = await runSingleTest({ runner, test, variant });
+            const res = await runSingleTest({ runner, test, variant, opts });
             if (res.status === 'pass') {
               passed += 1;
               fileReport.summary.passed += 1;

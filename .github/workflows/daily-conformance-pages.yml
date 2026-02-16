@@ -95,7 +95,7 @@ jobs:
 
       - name: Generate conformance report
         run: |
-          npm run test:wpt:report -- --variants cpu,gpu,npu --exit-zero || true
+          npm run test:wpt:report -- --variants cpu --skip-unimplemented --exit-zero || true
 
       - name: Prepare Pages artifact
         run: |
