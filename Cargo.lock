@@ -1057,7 +1057,7 @@ dependencies = [
 [[package]]
 name = "rustnn"
 version = "0.5.11"
-source = "git+https://github.com/rustnn/rustnn?branch=main#52c7ab03b62be62f38edcf5b11bc2c784e245c81"
+source = "git+https://github.com/rustnn/rustnn?branch=main#01ebcc53523baf53f68500b1d867e1429b18398b"
 dependencies = [
  "base64",
  "bytemuck",

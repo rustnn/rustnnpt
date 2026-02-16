@@ -3,7 +3,7 @@ use std::io::{self, BufRead, Write};
 
 use half::f16;
 use rustnn::{ContextProperties, ConverterRegistry, GraphError, GraphValidator};
-use rustnn::executors::onnx::{OnnxInput, TensorData, run_onnx_with_inputs_checked};
+use rustnn::executors::onnx::{OnnxInput, TensorData, run_onnx_with_inputs};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
@@ -215,7 +215,7 @@ fn execute_graph(
         .map_err(|e| RunnerError::GraphValidation(e.to_string()))?;
 
     let validator = GraphValidator::new(&graph_info, ContextProperties::default());
-    let artifacts = validator
+    let _artifacts = validator
         .validate()
         .map_err(|e| RunnerError::GraphValidation(e.to_string()))?;
 
@@ -232,12 +232,7 @@ fn execute_graph(
         });
     }
 
-    let outputs = run_onnx_with_inputs_checked(
-        &converted.data,
-        onnx_inputs,
-        &artifacts.input_names_to_descriptors,
-        &artifacts.output_names_to_descriptors,
-    )
+    let outputs = run_onnx_with_inputs(&converted.data, onnx_inputs)
     .map_err(|e| classify_graph_error(&e))?;
 
     let by_name: HashMap<String, _> = outputs.into_iter().map(|o| (o.name.clone(), o)).collect();
