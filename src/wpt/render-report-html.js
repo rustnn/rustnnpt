@@ -25,6 +25,14 @@ export function renderConformanceHtmlReport(report) {
   const skipped = report.summary.skipped ?? 0;
   const total = passed + failed + skipped;
   const generatedAt = report.meta.endedAt ?? new Date().toISOString();
+  const rustnnCommit = report.meta?.rustnn?.commit ?? null;
+  const rustnnCommitUrl = report.meta?.rustnn?.commitUrl ?? null;
+  const runDateText = new Date(generatedAt).toUTCString();
+  const rustnnLine = rustnnCommit
+    ? (rustnnCommitUrl
+      ? `<p class="hero-meta">RustNN commit: <a href="${escapeHtml(rustnnCommitUrl)}">${escapeHtml(rustnnCommit.slice(0, 12))}</a></p>`
+      : `<p class="hero-meta">RustNN commit: ${escapeHtml(rustnnCommit.slice(0, 12))}</p>`)
+    : '<p class="hero-meta">RustNN commit: unknown</p>';
 
   const fileSections = report.files.map((file) => {
     const cases = file.cases ?? [];
@@ -114,6 +122,8 @@ export function renderConformanceHtmlReport(report) {
       }
       .hero h1 { margin: 0 0 8px; font-size: 28px; }
       .hero p { margin: 0; opacity: 0.95; }
+      .hero-meta { margin-top: 8px !important; font-size: 14px; opacity: 0.95; }
+      .hero a { color: #d7f7ff; text-decoration: underline; }
       .cards {
         margin-top: 16px;
         display: grid;
@@ -203,7 +213,8 @@ export function renderConformanceHtmlReport(report) {
     <main class="wrap">
       <section class="hero">
         <h1>RustNNPT WebNN Conformance</h1>
-        <p>Generated ${escapeHtml(generatedAt)} | Duration ${escapeHtml(durationMs(report.meta.startedAt, report.meta.endedAt))}</p>
+        <p>Date: ${escapeHtml(runDateText)} | Duration ${escapeHtml(durationMs(report.meta.startedAt, report.meta.endedAt))}</p>
+        ${rustnnLine}
       </section>
 
       <section class="cards">

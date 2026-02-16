@@ -121,6 +121,12 @@ function serializeOptions(opts) {
   };
 }
 
+function rustnnMetaFromEnv() {
+  const commit = process.env.RUSTNN_GIT_SHA ?? null;
+  const commitUrl = process.env.RUSTNN_GIT_URL ?? null;
+  return { commit, commitUrl };
+}
+
 async function writeReportFile(filePath, content) {
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, content, 'utf8');
@@ -160,7 +166,8 @@ async function main() {
       startedAt,
       endedAt: null,
       options: serializeOptions(opts),
-      cwd: process.cwd()
+      cwd: process.cwd(),
+      rustnn: rustnnMetaFromEnv()
     },
     summary: {
       passed: 0,

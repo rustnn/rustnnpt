@@ -48,6 +48,16 @@ jobs:
       - name: Update git dependencies to latest main
         run: cargo update -p rustnn -p webnn-graph
 
+      - name: Export rustnn commit metadata for report
+        run: |
+          RUSTNN_SHA="$(perl -0777 -ne 'if (/name = "rustnn".*?source = "git\+https:\/\/github\.com\/rustnn\/rustnn\?branch=main#([0-9a-f]+)"/s) { print $1; }' Cargo.lock)"
+          if [ -z "$RUSTNN_SHA" ]; then
+            echo "Failed to detect rustnn git SHA from Cargo.lock" >&2
+            exit 1
+          fi
+          echo "RUSTNN_GIT_SHA=$RUSTNN_SHA" >> "$GITHUB_ENV"
+          echo "RUSTNN_GIT_URL=https://github.com/rustnn/rustnn/commit/$RUSTNN_SHA" >> "$GITHUB_ENV"
+
       - name: Download ONNX Runtime shared libraries (Linux)
         run: |
           ORT_DIR="target/onnxruntime"
