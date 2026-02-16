@@ -39,7 +39,13 @@ export function renderConformanceHtmlReport(report) {
       : `<p class="hero-meta">RustNN commit: ${escapeHtml(rustnnCommit.slice(0, 12))}</p>`)
     : '<p class="hero-meta">RustNN commit: unknown</p>';
 
-  const fileSections = report.files.map((file) => {
+  const sortedFiles = [...report.files].sort((a, b) => (
+    (b.summary?.failed ?? 0) - (a.summary?.failed ?? 0)
+    || (b.summary?.skipped ?? 0) - (a.summary?.skipped ?? 0)
+    || String(a.fileName ?? '').localeCompare(String(b.fileName ?? ''))
+  ));
+
+  const fileSections = sortedFiles.map((file) => {
     const cases = file.cases ?? [];
     const failedCases = cases.filter((c) => c.status === 'fail');
     const skippedCases = cases.filter((c) => c.status === 'skip');
@@ -126,27 +132,30 @@ export function renderConformanceHtmlReport(report) {
         padding: 24px 16px 40px;
       }
       .hero {
-        background: linear-gradient(130deg, #0b3c5d, #186f8d);
+        background: linear-gradient(130deg, #2a6a89, #4a97b0);
         color: #fff;
         border-radius: 14px;
         padding: 20px;
         box-shadow: 0 12px 30px rgba(16, 42, 67, 0.2);
+        display: flex;
+        align-items: stretch;
+        justify-content: space-between;
+        gap: 16px;
       }
       .hero h1 { margin: 0 0 8px; font-size: 28px; }
       .hero p { margin: 0; opacity: 0.95; }
       .hero-meta { margin-top: 8px !important; font-size: 14px; opacity: 0.95; }
       .hero a { color: #d7f7ff; text-decoration: underline; }
-      .hero-brand {
-        display: flex;
-        align-items: center;
-        gap: 12px;
+      .hero-copy {
+        flex: 1;
+        min-width: 0;
       }
-      .hero-brand img {
-        width: 44px;
-        height: 44px;
-        background: rgba(255, 255, 255, 0.12);
-        border-radius: 10px;
-        padding: 6px;
+      .hero-logo {
+        height: 100%;
+        width: auto;
+        max-width: 120px;
+        object-fit: contain;
+        align-self: stretch;
       }
       .cards {
         margin-top: 16px;
@@ -254,12 +263,12 @@ export function renderConformanceHtmlReport(report) {
   <body>
     <main class="wrap">
       <section class="hero">
-        <div class="hero-brand">
-          <img src="${escapeHtml(rustnnLogoUrl)}" alt="RustNN logo">
+        <div class="hero-copy">
           <h1>RustNN WPT Conformance</h1>
+          <p>Date: ${escapeHtml(runDateText)} | Duration ${escapeHtml(durationMs(report.meta.startedAt, report.meta.endedAt))}</p>
+          ${rustnnLine}
         </div>
-        <p>Date: ${escapeHtml(runDateText)} | Duration ${escapeHtml(durationMs(report.meta.startedAt, report.meta.endedAt))}</p>
-        ${rustnnLine}
+        <img class="hero-logo" src="${escapeHtml(rustnnLogoUrl)}" alt="RustNN logo">
       </section>
 
       <section class="cards">
