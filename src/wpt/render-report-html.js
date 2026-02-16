@@ -24,6 +24,7 @@ function wptSourceUrl(fileName) {
 }
 
 export function renderConformanceHtmlReport(report) {
+  const rustnnLogoUrl = 'https://raw.githubusercontent.com/rustnn/rustnn/main/logo/rustnn.svg';
   const passed = report.summary.passed ?? 0;
   const failed = report.summary.failed ?? 0;
   const skipped = report.summary.skipped ?? 0;
@@ -135,6 +136,18 @@ export function renderConformanceHtmlReport(report) {
       .hero p { margin: 0; opacity: 0.95; }
       .hero-meta { margin-top: 8px !important; font-size: 14px; opacity: 0.95; }
       .hero a { color: #d7f7ff; text-decoration: underline; }
+      .hero-brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .hero-brand img {
+        width: 44px;
+        height: 44px;
+        background: rgba(255, 255, 255, 0.12);
+        border-radius: 10px;
+        padding: 6px;
+      }
       .cards {
         margin-top: 16px;
         display: grid;
@@ -241,7 +254,10 @@ export function renderConformanceHtmlReport(report) {
   <body>
     <main class="wrap">
       <section class="hero">
-        <h1>RustNNPT WebNN Conformance</h1>
+        <div class="hero-brand">
+          <img src="${escapeHtml(rustnnLogoUrl)}" alt="RustNN logo">
+          <h1>RustNN WPT Conformance</h1>
+        </div>
         <p>Date: ${escapeHtml(runDateText)} | Duration ${escapeHtml(durationMs(report.meta.startedAt, report.meta.endedAt))}</p>
         ${rustnnLine}
       </section>
