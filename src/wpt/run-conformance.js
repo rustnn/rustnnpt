@@ -61,7 +61,6 @@ const SUPPORTED_DTYPES = new Set([
 // Keep this set aligned with rustnn's implementation-status docs.
 const UNIMPLEMENTED_OPS = new Set([
   'cumulative_sum',
-  'is_infinite',
   'is_nan',
   'l2_pool2d',
   'resample2d',
