@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-rustnn = { git = "https://github.com/rustnn/rustnn", rev = "216065ac5633c6c8ba96d5992d113d1406ede27c", features = ["onnx-runtime"] }
+rustnn = { git = "https://github.com/rustnn/rustnn", branch = "main", features = ["onnx-runtime"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"
