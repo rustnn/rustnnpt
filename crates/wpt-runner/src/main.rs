@@ -3,11 +3,14 @@ use std::io::{self, BufRead, Write};
 
 use half::f16;
 use rustnn::executors::onnx::{OnnxInput, TensorData, run_onnx_with_inputs};
-use rustnn::{ContextProperties, ConverterRegistry, GraphError, GraphValidator};
+use rustnn::{
+    ContextProperties, ConverterRegistry, GraphError, GraphInfo, GraphValidator,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 use webnn_graph::ast::GraphJson;
+use rustnn::graph::DataType;
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
@@ -333,10 +336,14 @@ fn execute_graph(
     let graph_info = rustnn::webnn_json::from_graph_json(&graph)
         .map_err(|e| RunnerError::GraphValidation(e.to_string()))?;
 
+    let mut graph_info = graph_info;
+    apply_expected_output_types(&mut graph_info, &expected_outputs);
+
     let validator = GraphValidator::new(&graph_info, ContextProperties::default());
     let _artifacts = validator
         .validate()
         .map_err(|e| RunnerError::GraphValidation(e.to_string()))?;
+
 
     let converted = ConverterRegistry::with_defaults()
         .convert("onnx", &graph_info)
@@ -487,5 +494,48 @@ fn main() {
                 let _ = stdout.flush();
             }
         }
+    }
+}
+
+fn apply_expected_output_types(
+    graph_info: &mut GraphInfo,
+    expected_outputs: &BTreeMap<String, ExpectedOutput>,
+) {
+    for (name, expected) in expected_outputs {
+        if let Some((idx, _operand)) = graph_info
+            .operands
+            .iter_mut()
+            .enumerate()
+            .find(|(_, operand)| operand.name.as_deref() == Some(name))
+        {
+            if let Some(dtype) = parse_data_type(&expected.descriptor.data_type) {
+                graph_info.operands[idx].descriptor.data_type = dtype;
+            }
+            let shape: Vec<u32> = expected
+                .descriptor
+                .shape
+                .iter()
+                .map(|&dim| dim as u32)
+                .collect();
+            if !shape.is_empty() {
+                graph_info.operands[idx].descriptor.shape = shape;
+            }
+        }
+    }
+}
+
+fn parse_data_type(dtype: &str) -> Option<DataType> {
+    match dtype {
+        "float32" => Some(DataType::Float32),
+        "float16" => Some(DataType::Float16),
+        "int32" => Some(DataType::Int32),
+        "uint32" => Some(DataType::Uint32),
+        "int64" => Some(DataType::Int64),
+        "uint64" => Some(DataType::Uint64),
+        "int8" => Some(DataType::Int8),
+        "uint8" => Some(DataType::Uint8),
+        "int4" => Some(DataType::Int4),
+        "uint4" => Some(DataType::Uint4),
+        _ => None,
     }
 }
