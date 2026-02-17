@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::{self, BufRead, Write};
 
 use half::f16;
-use rustnn::{ContextProperties, ConverterRegistry, GraphError, GraphValidator};
 use rustnn::executors::onnx::{OnnxInput, TensorData, run_onnx_with_inputs};
+use rustnn::{ContextProperties, ConverterRegistry, GraphError, GraphValidator};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
@@ -105,7 +105,9 @@ fn parse_u64(v: &Value) -> Result<u64, RunnerError> {
             .parse::<u64>()
             .map_err(|_| RunnerError::BadRequest(format!("invalid uint64 value: {s}")));
     }
-    Err(RunnerError::BadRequest(format!("invalid uint64 value: {v}")))
+    Err(RunnerError::BadRequest(format!(
+        "invalid uint64 value: {v}"
+    )))
 }
 
 fn parse_f32(v: &Value) -> Result<f32, RunnerError> {
@@ -130,7 +132,10 @@ fn shape_element_count(shape: &[usize]) -> Result<usize, RunnerError> {
     let mut count = 1usize;
     for &dim in shape {
         count = count.checked_mul(dim).ok_or_else(|| {
-            RunnerError::BadRequest(format!("shape element count overflow for shape {:?}", shape))
+            RunnerError::BadRequest(format!(
+                "shape element count overflow for shape {:?}",
+                shape
+            ))
         })?;
     }
     Ok(count.max(1))
@@ -156,11 +161,17 @@ fn normalize_input_values(
     )))
 }
 
-fn to_tensor_data(descriptor: &TensorDescriptor, data: &[Value]) -> Result<TensorData, RunnerError> {
+fn to_tensor_data(
+    descriptor: &TensorDescriptor,
+    data: &[Value],
+) -> Result<TensorData, RunnerError> {
     let normalized = normalize_input_values(descriptor, data)?;
     match descriptor.data_type.as_str() {
         "float32" => Ok(TensorData::Float32(
-            normalized.iter().map(parse_f32).collect::<Result<Vec<_>, _>>()?,
+            normalized
+                .iter()
+                .map(parse_f32)
+                .collect::<Result<Vec<_>, _>>()?,
         )),
         "float16" => {
             let bits = normalized
@@ -211,38 +222,96 @@ fn to_tensor_data(descriptor: &TensorDescriptor, data: &[Value]) -> Result<Tenso
     }
 }
 
-fn cast_output_data(data: &[f32], dtype: &str) -> Vec<Value> {
+fn cast_output_data(
+    data: &[f64],
+    int64_data: Option<&[i64]>,
+    uint64_data: Option<&[u64]>,
+    dtype: &str,
+) -> Vec<Value> {
+    fn float_value(x: f64) -> Value {
+        if x.is_nan() {
+            Value::String("NaN".to_string())
+        } else if x.is_infinite() {
+            if x.is_sign_positive() {
+                Value::String("Infinity".to_string())
+            } else {
+                Value::String("-Infinity".to_string())
+            }
+        } else {
+            Value::from(x)
+        }
+    }
+
     match dtype {
-        "float32" => data.iter().map(|x| Value::from(*x as f64)).collect(),
+        "float32" => data.iter().map(|x| float_value(*x)).collect(),
         "float16" => data
             .iter()
-            .map(|x| Value::from(f16::from_f32(*x).to_f32() as f64))
+            .map(|x| float_value(f16::from_f32(*x as f32).to_f32() as f64))
             .collect(),
-        "int8" => data.iter().map(|x| Value::from((*x as i8) as i64)).collect(),
-        "uint8" | "uint4" => data.iter().map(|x| Value::from((*x as u8) as u64)).collect(),
+        "int8" => data
+            .iter()
+            .map(|x| Value::from((*x as i8) as i64))
+            .collect(),
+        "uint8" | "uint4" => data
+            .iter()
+            .map(|x| Value::from((*x as u8) as u64))
+            .collect(),
         "int4" => data
             .iter()
             .map(|x| Value::from(((*x as i8).clamp(-8, 7)) as i64))
             .collect(),
-        "int32" => data.iter().map(|x| Value::from((*x as i32) as i64)).collect(),
-        "uint32" => data.iter().map(|x| Value::from((*x as u32) as u64)).collect(),
-        "int64" => data
+        "int32" => data
             .iter()
-            .map(|x| Value::String((*x as i64).to_string()))
+            .map(|x| Value::from((*x as i32) as i64))
             .collect(),
-        "uint64" => data
+        "uint32" => data
             .iter()
-            .map(|x| Value::String((*x as u64).to_string()))
+            .map(|x| Value::from((*x as u32) as u64))
             .collect(),
-        _ => data.iter().map(|x| Value::from(*x as f64)).collect(),
+        "int64" => {
+            if let Some(values) = int64_data {
+                values
+                    .iter()
+                    .map(|x| Value::String(x.to_string()))
+                    .collect()
+            } else {
+                data.iter()
+                    .map(|x| Value::String((*x as i64).to_string()))
+                    .collect()
+            }
+        }
+        "uint64" => {
+            if let Some(values) = uint64_data {
+                values
+                    .iter()
+                    .map(|x| Value::String(x.to_string()))
+                    .collect()
+            } else {
+                data.iter()
+                    .map(|x| Value::String((*x as u64).to_string()))
+                    .collect()
+            }
+        }
+        _ => data.iter().map(|x| float_value(*x)).collect(),
     }
 }
 
-fn cast_output_data_compact(data: &[f32], dtype: &str, expected_len: usize) -> Vec<Value> {
+fn cast_output_data_compact(
+    data: &[f64],
+    int64_data: Option<&[i64]>,
+    uint64_data: Option<&[u64]>,
+    dtype: &str,
+    expected_len: usize,
+) -> Vec<Value> {
     if expected_len == 1 && !data.is_empty() {
-        return cast_output_data(&data[..1], dtype);
+        return cast_output_data(
+            &data[..1],
+            int64_data.map(|v| &v[..1]),
+            uint64_data.map(|v| &v[..1]),
+            dtype,
+        );
     }
-    cast_output_data(data, dtype)
+    cast_output_data(data, int64_data, uint64_data, dtype)
 }
 
 fn classify_graph_error(err: &GraphError) -> RunnerError {
@@ -282,8 +351,8 @@ fn execute_graph(
         });
     }
 
-    let outputs = run_onnx_with_inputs(&converted.data, onnx_inputs)
-    .map_err(|e| classify_graph_error(&e))?;
+    let outputs =
+        run_onnx_with_inputs(&converted.data, onnx_inputs).map_err(|e| classify_graph_error(&e))?;
 
     let by_name: HashMap<String, _> = outputs.into_iter().map(|o| (o.name.clone(), o)).collect();
 
@@ -297,7 +366,12 @@ fn execute_graph(
                         data_type: "float32".to_string(),
                         shape: output.shape,
                     },
-                    data: cast_output_data(&output.data, "float32"),
+                    data: cast_output_data(
+                        &output.data,
+                        output.int64_data.as_deref(),
+                        output.uint64_data.as_deref(),
+                        "float32",
+                    ),
                 },
             );
         }
@@ -315,6 +389,8 @@ fn execute_graph(
                     },
                     data: cast_output_data_compact(
                         &output.data,
+                        output.int64_data.as_deref(),
+                        output.uint64_data.as_deref(),
                         &expected.descriptor.data_type,
                         expected.data.len(),
                     ),
@@ -344,7 +420,11 @@ fn main() {
         let raw = match line {
             Ok(l) => l,
             Err(e) => {
-                let _ = writeln!(stdout, "{{\"id\":\"unknown\",\"ok\":false,\"error\":{{\"kind\":\"BadRequestError\",\"message\":\"{}\"}}}}", e);
+                let _ = writeln!(
+                    stdout,
+                    "{{\"id\":\"unknown\",\"ok\":false,\"error\":{{\"kind\":\"BadRequestError\",\"message\":\"{}\"}}}}",
+                    e
+                );
                 let _ = stdout.flush();
                 continue;
             }
@@ -365,23 +445,23 @@ fn main() {
             }) => {
                 let _ = context_options;
                 match execute_graph(graph, inputs, expected_outputs) {
-                Ok(outputs) => Response {
-                    id,
-                    ok: true,
-                    outputs: Some(outputs),
-                    error: None,
-                },
-                Err(err) => Response {
-                    id,
-                    ok: false,
-                    outputs: None,
-                    error: Some(ErrorPayload {
-                        kind: error_kind(&err),
-                        message: err.to_string(),
-                    }),
-                },
+                    Ok(outputs) => Response {
+                        id,
+                        ok: true,
+                        outputs: Some(outputs),
+                        error: None,
+                    },
+                    Err(err) => Response {
+                        id,
+                        ok: false,
+                        outputs: None,
+                        error: Some(ErrorPayload {
+                            kind: error_kind(&err),
+                            message: err.to_string(),
+                        }),
+                    },
+                }
             }
-            },
             Err(err) => Response {
                 id: "unknown".to_string(),
                 ok: false,

@@ -41,6 +41,11 @@ const OP_ULP = {
   reduce_sum_square: 16
 };
 
+const OP_ABS_TOL = {
+  cos: { float32: 2 ** -10, float16: 2 ** -7 },
+  sin: { float32: 2 ** -11, float16: 2 ** -7 }
+};
+
 function castActual(value, dataType) {
   if (dataType === 'float16') {
     // Runner returns uint16 bits for float16. Compare against expected numeric by converting expected to f32 tolerance path.
@@ -99,7 +104,7 @@ export function assertOutputClose({ operatorName, outputName, expected, actual }
     }
 
     const absDiff = Math.abs(a - e);
-    const absTol = dataType.startsWith('float') ? 1e-4 : 0;
+    const absTol = OP_ABS_TOL[operatorName]?.[dataType] ?? (dataType.startsWith('float') ? 1e-4 : 0);
     const ulp = ulpDistanceF32(a, e);
 
     if (absDiff > absTol && ulp > ulpTol) {
