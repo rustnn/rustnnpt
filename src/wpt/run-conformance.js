@@ -233,6 +233,20 @@ async function main() {
         tests = extractTestsFromSource(source, path.basename(file)).slice(0, opts.limitTests);
       } catch (err) {
         fileReport.fileError = err.message;
+        const skipReason = err.message.includes('No <name>Tests array');
+        if (skipReason) {
+          report.summary.skipped += 1;
+          fileReport.summary.skipped += 1;
+          fileReport.cases.push({
+            testName: '<file>',
+            variant: opts.variants[0],
+            status: 'skip',
+            reason: err.message
+          });
+          console.log(`\n[FILE] ${fileReport.fileName} (non-graph test)`);
+          console.log(`  - SKIP ${err.message}`);
+          continue;
+        }
         failures.push(`${fileReport.fileName} :: FILE_PARSE :: ${err.message}`);
         failed += 1;
         fileReport.summary.failed += 1;
