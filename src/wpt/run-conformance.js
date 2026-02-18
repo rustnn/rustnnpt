@@ -63,7 +63,6 @@ const UNIMPLEMENTED_OPS = new Set([
   'cumulative_sum',
   'is_nan',
   'l2_pool2d',
-  'reverse',
   'round_even',
   // Intentionally deferred in rustnn.
   'gru',
