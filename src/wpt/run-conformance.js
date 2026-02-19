@@ -60,10 +60,8 @@ const SUPPORTED_DTYPES = new Set([
 
 // Keep this set aligned with rustnn's implementation-status docs.
 const UNIMPLEMENTED_OPS = new Set([
-  'cumulative_sum',
   'is_nan',
   'l2_pool2d',
-  'round_even',
   // Intentionally deferred in rustnn.
   'gru',
   'gru_cell',
