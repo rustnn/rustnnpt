@@ -232,7 +232,7 @@ async function main() {
         fileReport.fileError = err.message;
         const skipReason = err.message.includes('No <name>Tests array');
         if (skipReason) {
-          report.summary.skipped += 1;
+          skipped += 1;
           fileReport.summary.skipped += 1;
           fileReport.cases.push({
             testName: '<file>',
