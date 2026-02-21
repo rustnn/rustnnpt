@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 use webnn_graph::ast::GraphJson;
-use rustnn::graph::DataType;
+use rustnn::graph::{DataType, to_dimension_vector};
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
@@ -518,7 +518,7 @@ fn apply_expected_output_types(
                 .map(|&dim| dim as u32)
                 .collect();
             if !shape.is_empty() {
-                graph_info.operands[idx].descriptor.shape = shape;
+                graph_info.operands[idx].descriptor.shape = to_dimension_vector(&shape);
             }
         }
     }
