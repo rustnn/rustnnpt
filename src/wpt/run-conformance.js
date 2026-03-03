@@ -1,4 +1,23 @@
 #!/usr/bin/env node
+
+/*
+ * SPDX-FileCopyrightText: Copyright (c) 2026 Tarek Ziadé <tarek@ziade.org>
+ * SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -9,6 +28,47 @@ import { executeGraphResources } from '../shim/webnn-shim.js';
 import { extractTestsFromSource } from './extract-tests.js';
 import { renderConformanceHtmlReport } from './render-report-html.js';
 import { assertOutputClose } from './tolerance.js';
+
+/** Format a tensor (descriptor + data) for debug logging; truncate long arrays. */
+function formatTensorForLog(label, obj, maxElements = 40) {
+  if (!obj) return `${label}: (none)`;
+  const desc = obj.descriptor ?? {};
+  const data = Array.isArray(obj.data) ? obj.data : (obj.data != null ? [obj.data] : []);
+  const shape = desc.shape ?? [];
+  const shapeStr = JSON.stringify(shape);
+  const total = data.length;
+  let dataStr;
+  if (total <= maxElements) {
+    dataStr = JSON.stringify(data);
+  } else {
+    const head = data.slice(0, Math.min(12, total));
+    const tail = data.slice(-8);
+    dataStr = `[${head.join(', ')} ... (${total} total) ... ${tail.join(', ')}]`;
+  }
+  return `${label} shape=${shapeStr} (${total} elements)\n  data: ${dataStr}`;
+}
+
+/** On assertion failure, log test name, inputs, expected outputs, and actual outputs to stderr. */
+function logFailureDetail(testName, graph, outputs) {
+  const inputs = graph?.inputs ?? {};
+  const expectedOutputs = graph?.expectedOutputs ?? {};
+  console.error('\n--- FAILURE DETAIL ---');
+  console.error(`test: ${testName ?? '(unknown)'}`);
+  console.error('\n--- inputs ---');
+  for (const [name, input] of Object.entries(inputs)) {
+    const data = Array.isArray(input?.data) ? input.data : (input?.data != null ? [input.data] : []);
+    console.error(formatTensorForLog(`input "${name}"`, { descriptor: input?.descriptor, data }));
+  }
+  console.error('\n--- expected outputs ---');
+  for (const [name, expected] of Object.entries(expectedOutputs)) {
+    console.error(formatTensorForLog(`expected "${name}"`, expected));
+  }
+  console.error('\n--- actual outputs ---');
+  for (const [name, actual] of Object.entries(outputs ?? {})) {
+    console.error(formatTensorForLog(`actual "${name}"`, actual));
+  }
+  console.error('---\n');
+}
 
 function parseArgs(argv) {
   const opts = {
@@ -45,6 +105,14 @@ function parseArgs(argv) {
     else if (arg === '--exit-zero') opts.exitZero = true;
     else if (arg === '--help') {
       console.log('Usage: node src/wpt/run-conformance.js [--wpt-dir PATH] [--op NAME] [--file FILE] [--limit-tests N] [--limit-files N] [--backend onnx|coreml|trtx] [--backends LIST] [--variants cpu,gpu,npu] [--runner-features LIST] [--skip-unimplemented] [--stop-on-fail] [--report-json PATH] [--report-html PATH] [--exit-zero]');
+    }
+    else if (arg === '--debug') {
+      process.env.RUSTNNPT_DEBUG = '2';
+      process.env.RUSTNN_DEBUG = '2';
+      // ONNX debug dump (when RUSTNN_DEBUG=2) writes to this folder
+      process.env.RUSTNN_DEBUG_ONNX_DIR = process.env.RUSTNN_DEBUG_ONNX_DIR ?? 'C:\\git\\rustnn-workspace\\rustnnpt';
+    } else if (arg === '--help') {
+      console.log('Usage: node src/wpt/run-conformance.js [--wpt-dir PATH] [--op NAME] [--file FILE] [--limit-tests N] [--limit-files N] [--variants cpu,gpu,npu] [--skip-unimplemented] [--stop-on-fail | --no-stop-on-fail] [--report-json PATH] [--report-html PATH] [--exit-zero] [--debug]');
       process.exit(0);
     }
   }
@@ -128,7 +196,7 @@ function isRunnerCrashError(err) {
     || msg.includes('SIGTRAP');
 }
 
-async function runSingleTest({ runner, test, backend, variant, opts }) {
+async function runSingleTest({ runner, test, backend, variant, opts, testName }) {
   const graph = test.graph;
   const skipReason = shouldSkipTest(test, opts);
   if (skipReason) {
@@ -139,17 +207,22 @@ async function runSingleTest({ runner, test, backend, variant, opts }) {
   const normalizedGraph = buildGraphJson(graph);
   const lastOp = normalizedGraph.nodes[normalizedGraph.nodes.length - 1]?.op ?? 'unknown';
 
-  for (const [name, expected] of Object.entries(graph.expectedOutputs ?? {})) {
-    const actual = outputs[name];
-    if (!actual) {
-      throw new Error(`missing output: ${name}`);
+  try {
+    for (const [name, expected] of Object.entries(graph.expectedOutputs ?? {})) {
+      const actual = outputs[name];
+      if (!actual) {
+        throw new Error(`missing output: ${name}`);
+      }
+      assertOutputClose({
+        operatorName: normalizeOpName(lastOp),
+        outputName: name,
+        expected,
+        actual
+      });
     }
-    assertOutputClose({
-      operatorName: normalizeOpName(lastOp),
-      outputName: name,
-      expected,
-      actual
-    });
+  } catch (err) {
+    logFailureDetail(testName, graph, outputs);
+    throw err;
   }
 
   return { status: 'pass' };
@@ -298,7 +371,7 @@ async function main() {
               continue;
             }
             try {
-              const res = await runSingleTest({ runner, test, backend, variant, opts });
+              const res = await runSingleTest({ runner, test, backend, variant, opts, testName });
               if (res.status === 'pass') {
                 passed += 1;
                 fileReport.summary.passed += 1;

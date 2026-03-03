@@ -1,7 +1,26 @@
+/*
+ * SPDX-FileCopyrightText: Copyright (c) 2026 Tarek Ziadé <tarek@ziade.org>
+ * SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readdirSync } from 'node:fs';
 import { createInterface } from 'node:readline';
+import { join, sep } from 'node:path';
+import { env } from 'node:process';
 import path from 'node:path';
 
 function findOrtLibDirs(baseDir) {
@@ -68,6 +87,26 @@ function withCargoCheckCfgEnv(env) {
   return env;
 }
 
+function resolveBinary(binName) {
+  const extension = '.exe';
+  const target = binName.endsWith(extension) ? binName : binName + extension;
+
+  // 1. Try the raw name (let the OS try one last time)
+  // 2. Split the PATH and look manually
+  const paths = (env.PATH || '').split(';');
+  
+  for (let p of paths) {
+      // Remove quotes often added by Windows path editors
+      const cleanPath = p.replace(/^"|"$/g, '');
+      const fullPath = join(cleanPath, target);
+      
+      if (existsSync(fullPath)) {
+          return fullPath;
+      }
+  }
+  return binName; // Fallback to original and hope for the best
+}
+
 export class RunnerClient {
   constructor({ manifestPath = 'crates/wpt-runner/Cargo.toml', cwd = process.cwd(), runnerFeatures = [] } = {}) {
     this.cwd = cwd;
@@ -80,7 +119,12 @@ export class RunnerClient {
     }
 
     const env = withCargoCheckCfgEnv(withOrtRuntimeEnv(cwd));
-    this.proc = spawn('cargo', cargoArgs, {
+    // On Windows node.js does not find cargo in the path. Search for it.
+    const cargoExecutable = resolveBinary('cargo');
+
+    this.proc = spawn(cargoExecutable, cargoArgs, {
+
+
       cwd,
       stdio: ['pipe', 'pipe', 'inherit'],
       env

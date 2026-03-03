@@ -1,13 +1,31 @@
+/*
+ * SPDX-FileCopyrightText: Copyright (c) 2026 Tarek Ziadé <tarek@ziade.org>
+ * SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 use std::collections::{BTreeMap, HashMap};
 use std::io::{self, BufRead, Write};
 
 use half::f16;
 #[cfg(all(target_os = "macos", feature = "backend-coreml"))]
 use rustnn::executors::coreml::{CoremlInput, CoremlOutput, run_coreml_with_inputs_with_weights};
-use rustnn::executors::onnx::{OnnxInput, OnnxOutputWithData, TensorData, run_onnx_with_inputs};
+
 #[cfg(any(feature = "backend-trtx", feature = "backend-trtx-mock"))]
 use rustnn::executors::trtx::{TrtxInput, TrtxOutputWithData, run_trtx_with_inputs};
-use rustnn::graph::{DataType, to_dimension_vector};
+
+use rustnn::executors::onnx::{OnnxInput, OnnxOutputWithData, TensorData, run_onnx_with_inputs};
 use rustnn::{ContextProperties, ConverterRegistry, GraphError, GraphInfo, GraphValidator};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -672,17 +690,27 @@ fn execute_graph(
     let graph_info = rustnn::webnn_json::from_graph_json(&graph)
         .map_err(|e| RunnerError::GraphValidation(e.to_string()))?;
 
-    let mut graph_info = graph_info;
-    apply_expected_output_types(&mut graph_info, &expected_outputs);
-
     let validator = GraphValidator::new(&graph_info, ContextProperties::default());
     let _artifacts = validator
         .validate()
         .map_err(|e| RunnerError::GraphValidation(e.to_string()))?;
 
+    if std::env::var("RUSTNNPT_DEBUG").as_deref() == Ok("1") {
+        eprintln!("[RUNNER] inputs (BTreeMap iteration order):");
+        for (name, input) in &inputs {
+            eprintln!(
+                "  {} shape={:?} data.len()={}",
+                name,
+                input.descriptor.shape,
+                input.data.len()
+            );
+        }
+    }
+
     let _requested_device = context_options.device_type.as_deref().unwrap_or("cpu");
     let backend = Backend::from_context(&context_options)?;
     let outputs = execute_backend(backend, &graph_info, &inputs)?;
+
     let by_name: HashMap<String, _> = outputs.into_iter().map(|o| (o.name.clone(), o)).collect();
 
     let mut out = BTreeMap::new();
@@ -709,6 +737,15 @@ fn execute_graph(
             let output = by_name.get(name).ok_or_else(|| {
                 RunnerError::RuntimeExecution(format!("missing output from runtime: {name}"))
             })?;
+            let expected_element_count = shape_element_count(&expected.descriptor.shape)?;
+            let actual_len = output.data.len();
+            if actual_len != expected_element_count {
+                return Err(RunnerError::RuntimeExecution(format!(
+                    "output {name}: runtime returned {actual_len} elements but expected {} (shape {:?})",
+                    expected_element_count,
+                    expected.descriptor.shape
+                )));
+            }
             out.insert(
                 name.clone(),
                 OutputTensor {
@@ -816,45 +853,4 @@ fn main() {
     }
 }
 
-fn apply_expected_output_types(
-    graph_info: &mut GraphInfo,
-    expected_outputs: &BTreeMap<String, ExpectedOutput>,
-) {
-    for (name, expected) in expected_outputs {
-        if let Some((idx, _operand)) = graph_info
-            .operands
-            .iter_mut()
-            .enumerate()
-            .find(|(_, operand)| operand.name.as_deref() == Some(name))
-        {
-            if let Some(dtype) = parse_data_type(&expected.descriptor.data_type) {
-                graph_info.operands[idx].descriptor.data_type = dtype;
-            }
-            let shape: Vec<u32> = expected
-                .descriptor
-                .shape
-                .iter()
-                .map(|&dim| dim as u32)
-                .collect();
-            if !shape.is_empty() {
-                graph_info.operands[idx].descriptor.shape = to_dimension_vector(&shape);
-            }
-        }
-    }
-}
 
-fn parse_data_type(dtype: &str) -> Option<DataType> {
-    match dtype {
-        "float32" => Some(DataType::Float32),
-        "float16" => Some(DataType::Float16),
-        "int32" => Some(DataType::Int32),
-        "uint32" => Some(DataType::Uint32),
-        "int64" => Some(DataType::Int64),
-        "uint64" => Some(DataType::Uint64),
-        "int8" => Some(DataType::Int8),
-        "uint8" => Some(DataType::Uint8),
-        "int4" => Some(DataType::Int4),
-        "uint4" => Some(DataType::Uint4),
-        _ => None,
-    }
-}
