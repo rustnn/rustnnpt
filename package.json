@@ -9,7 +9,11 @@
     "test:wpt:run": "node src/wpt/run-conformance.js",
     "test:wpt:report": "node src/wpt/run-conformance.js --report-json reports/conformance.json --report-html reports/conformance.html",
     "build:runner": "cargo build --manifest-path crates/wpt-runner/Cargo.toml",
-    "check:runner": "cargo check --manifest-path crates/wpt-runner/Cargo.toml"
+    "build:runner:coreml": "cargo build --manifest-path crates/wpt-runner/Cargo.toml --no-default-features --features backend-onnx,backend-coreml",
+    "build:runner:trtx-mock": "cargo build --manifest-path crates/wpt-runner/Cargo.toml --no-default-features --features backend-onnx,backend-trtx-mock",
+    "build:runner:all": "cargo build --manifest-path crates/wpt-runner/Cargo.toml --no-default-features --features backend-onnx,backend-coreml,backend-trtx,backend-trtx-mock",
+    "check:runner": "cargo check --manifest-path crates/wpt-runner/Cargo.toml",
+    "check:runner:all": "cargo check --manifest-path crates/wpt-runner/Cargo.toml --no-default-features --features backend-onnx,backend-coreml,backend-trtx,backend-trtx-mock"
   },
   "engines": {
     "node": ">=20"

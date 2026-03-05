@@ -57,13 +57,33 @@ function withOrtRuntimeEnv(cwd) {
   return env;
 }
 
+function withCargoCheckCfgEnv(env) {
+  // objc macros still probe feature="cargo-clippy"; allow it to avoid noisy warnings.
+  const allowCargoClippy = '--check-cfg=cfg(feature,values("cargo-clippy"))';
+  const existing = env.RUSTFLAGS ?? '';
+  if (existing.includes('values("cargo-clippy")')) {
+    return env;
+  }
+  env.RUSTFLAGS = existing ? `${existing} ${allowCargoClippy}` : allowCargoClippy;
+  return env;
+}
+
 export class RunnerClient {
-  constructor({ manifestPath = 'crates/wpt-runner/Cargo.toml', cwd = process.cwd() } = {}) {
+  constructor({ manifestPath = 'crates/wpt-runner/Cargo.toml', cwd = process.cwd(), runnerFeatures = [] } = {}) {
     this.cwd = cwd;
-    this.proc = spawn('cargo', ['run', '--quiet', '--manifest-path', manifestPath], {
+    const features = Array.isArray(runnerFeatures)
+      ? runnerFeatures.map((f) => String(f).trim()).filter(Boolean)
+      : String(runnerFeatures ?? '').split(',').map((f) => f.trim()).filter(Boolean);
+    const cargoArgs = ['run', '--quiet', '--manifest-path', manifestPath];
+    if (features.length > 0) {
+      cargoArgs.push('--no-default-features', '--features', features.join(','));
+    }
+
+    const env = withCargoCheckCfgEnv(withOrtRuntimeEnv(cwd));
+    this.proc = spawn('cargo', cargoArgs, {
       cwd,
       stdio: ['pipe', 'pipe', 'inherit'],
-      env: withOrtRuntimeEnv(cwd)
+      env
     });
     this.pending = new Map();
 
@@ -95,6 +115,14 @@ export class RunnerClient {
       }
       this.pending.clear();
     });
+
+    this.proc.stdin.on('error', (err) => {
+      const wrapped = new Error(`runner stdin error: ${err.message}`);
+      for (const { reject } of this.pending.values()) {
+        reject(wrapped);
+      }
+      this.pending.clear();
+    });
   }
 
   async executeGraph({ graph, inputs, expectedOutputs, contextOptions = {} }) {
@@ -109,8 +137,18 @@ export class RunnerClient {
     };
 
     return new Promise((resolve, reject) => {
+      if (!this.proc || this.proc.killed || this.proc.exitCode !== null) {
+        reject(new Error(`runner exited before request dispatch (exitCode=${this.proc?.exitCode ?? 'unknown'})`));
+        return;
+      }
       this.pending.set(id, { resolve, reject });
-      this.proc.stdin.write(`${JSON.stringify(payload)}\n`);
+      this.proc.stdin.write(`${JSON.stringify(payload)}\n`, (err) => {
+        if (!err) return;
+        const waiter = this.pending.get(id);
+        if (!waiter) return;
+        this.pending.delete(id);
+        waiter.reject(new Error(`failed to send request to runner: ${err.message}`));
+      });
     });
   }
 

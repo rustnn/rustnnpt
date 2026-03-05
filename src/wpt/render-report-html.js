@@ -63,9 +63,9 @@ export function renderConformanceHtmlReport(report) {
           <summary>Failures (${failedCases.length})</summary>
           <table>
             <thead>
-              <tr><th>Test</th><th>Variant</th><th>Error</th></tr>
+              <tr><th>Test</th><th>Backend</th><th>Variant</th><th>Error</th></tr>
             </thead>
-            <tbody>${failedCases.map((c) => `<tr><td>${escapeHtml(c.testName)}</td><td>${escapeHtml(c.variant)}</td><td>${escapeHtml(c.error ?? '')}</td></tr>`).join('\n')}</tbody>
+            <tbody>${failedCases.map((c) => `<tr><td>${escapeHtml(c.testName)}</td><td>${escapeHtml(c.backend ?? 'onnx')}</td><td>${escapeHtml(c.variant)}</td><td>${escapeHtml(c.error ?? '')}</td></tr>`).join('\n')}</tbody>
           </table>
         </details>
       `
@@ -77,9 +77,9 @@ export function renderConformanceHtmlReport(report) {
           <summary>Skipped (${skippedCases.length})</summary>
           <table>
             <thead>
-              <tr><th>Test</th><th>Variant</th><th>Reason</th></tr>
+              <tr><th>Test</th><th>Backend</th><th>Variant</th><th>Reason</th></tr>
             </thead>
-            <tbody>${skippedCases.map((c) => `<tr><td><a href="${escapeHtml(sourceUrl)}">${escapeHtml(c.testName)}</a></td><td>${escapeHtml(c.variant)}</td><td>${escapeHtml(c.reason ?? '')}</td></tr>`).join('\n')}</tbody>
+            <tbody>${skippedCases.map((c) => `<tr><td><a href="${escapeHtml(sourceUrl)}">${escapeHtml(c.testName)}</a></td><td>${escapeHtml(c.backend ?? 'onnx')}</td><td>${escapeHtml(c.variant)}</td><td>${escapeHtml(c.reason ?? '')}</td></tr>`).join('\n')}</tbody>
           </table>
         </details>
       `

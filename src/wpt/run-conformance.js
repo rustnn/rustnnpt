@@ -17,7 +17,9 @@ function parseArgs(argv) {
     file: null,
     limitTests: Number.POSITIVE_INFINITY,
     limitFiles: Number.POSITIVE_INFINITY,
+    backends: ['onnx'],
     variants: ['cpu'],
+    runnerFeatures: null,
     skipUnimplemented: false,
     stopOnFail: false,
     reportJson: null,
@@ -32,17 +34,23 @@ function parseArgs(argv) {
     else if (arg === '--file') opts.file = argv[++i];
     else if (arg === '--limit-tests') opts.limitTests = Number(argv[++i]);
     else if (arg === '--limit-files') opts.limitFiles = Number(argv[++i]);
+    else if (arg === '--backend') opts.backends = [String(argv[++i]).trim()].filter(Boolean);
+    else if (arg === '--backends') opts.backends = argv[++i].split(',').map((s) => s.trim()).filter(Boolean);
     else if (arg === '--variants') opts.variants = argv[++i].split(',').map((s) => s.trim()).filter(Boolean);
+    else if (arg === '--runner-features') opts.runnerFeatures = argv[++i].split(',').map((s) => s.trim()).filter(Boolean);
     else if (arg === '--stop-on-fail') opts.stopOnFail = true;
     else if (arg === '--skip-unimplemented') opts.skipUnimplemented = true;
     else if (arg === '--report-json') opts.reportJson = argv[++i];
     else if (arg === '--report-html') opts.reportHtml = argv[++i];
     else if (arg === '--exit-zero') opts.exitZero = true;
     else if (arg === '--help') {
-      console.log('Usage: node src/wpt/run-conformance.js [--wpt-dir PATH] [--op NAME] [--file FILE] [--limit-tests N] [--limit-files N] [--variants cpu,gpu,npu] [--skip-unimplemented] [--stop-on-fail] [--report-json PATH] [--report-html PATH] [--exit-zero]');
+      console.log('Usage: node src/wpt/run-conformance.js [--wpt-dir PATH] [--op NAME] [--file FILE] [--limit-tests N] [--limit-files N] [--backend onnx|coreml|trtx] [--backends LIST] [--variants cpu,gpu,npu] [--runner-features LIST] [--skip-unimplemented] [--stop-on-fail] [--report-json PATH] [--report-html PATH] [--exit-zero]');
       process.exit(0);
     }
   }
+
+  if (opts.backends.length === 0) opts.backends = ['onnx'];
+  if (opts.variants.length === 0) opts.variants = ['cpu'];
 
   return opts;
 }
@@ -106,18 +114,28 @@ function normalizeOpName(opName) {
   return opName.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
 }
 
-function contextOptionsForVariant(variant) {
-  return { deviceType: variant };
+function contextOptionsForRun(backend, variant) {
+  return { backend, deviceType: variant };
 }
 
-async function runSingleTest({ runner, test, variant, opts }) {
+function isRunnerCrashError(err) {
+  const msg = String(err?.message ?? '');
+  return msg.includes('runner exited')
+    || msg.includes('stream was destroyed')
+    || msg.includes('failed to send request to runner')
+    || msg.includes('runner stdin error')
+    || msg.includes('EPIPE')
+    || msg.includes('SIGTRAP');
+}
+
+async function runSingleTest({ runner, test, backend, variant, opts }) {
   const graph = test.graph;
   const skipReason = shouldSkipTest(test, opts);
   if (skipReason) {
     return { status: 'skip', reason: skipReason };
   }
 
-  const outputs = await executeGraphResources(runner, graph, contextOptionsForVariant(variant));
+  const outputs = await executeGraphResources(runner, graph, contextOptionsForRun(backend, variant));
   const normalizedGraph = buildGraphJson(graph);
   const lastOp = normalizedGraph.nodes[normalizedGraph.nodes.length - 1]?.op ?? 'unknown';
 
@@ -145,7 +163,9 @@ function serializeOptions(opts) {
     file: opts.file,
     limitTests: numberOrNull(opts.limitTests),
     limitFiles: numberOrNull(opts.limitFiles),
+    backends: opts.backends,
     variants: opts.variants,
+    runnerFeatures: opts.runnerFeatures,
     skipUnimplemented: opts.skipUnimplemented,
     stopOnFail: opts.stopOnFail,
     reportJson: opts.reportJson,
@@ -187,7 +207,7 @@ async function main() {
     process.exit(2);
   }
 
-  const runner = new RunnerClient();
+  let runner = new RunnerClient({ runnerFeatures: opts.runnerFeatures ?? [] });
 
   let passed = 0;
   let failed = 0;
@@ -236,6 +256,7 @@ async function main() {
           fileReport.summary.skipped += 1;
           fileReport.cases.push({
             testName: '<file>',
+            backend: opts.backends[0],
             variant: opts.variants[0],
             status: 'skip',
             reason: err.message
@@ -255,66 +276,78 @@ async function main() {
       fileReport.selectedTests = tests.length;
       console.log(`\n[FILE] ${fileReport.fileName} (${tests.length} tests)`);
 
-      for (const variant of opts.variants) {
-        console.log(`[VARIANT] ${variant} -> cpu-backed runner`);
-        for (let testIndex = 0; testIndex < tests.length; testIndex += 1) {
-          const test = tests[testIndex];
-          const testName = test?.name ?? `[unnamed-${testIndex}]`;
-          const started = Date.now();
-          if (!test || typeof test !== 'object' || !test.graph) {
-            skipped += 1;
-            fileReport.summary.skipped += 1;
-            fileReport.cases.push({
-              testName,
-              variant,
-              status: 'skip',
-              reason: 'invalid extracted test case',
-              durationMs: 0
-            });
-            console.log(`  - SKIP ${testName}: invalid extracted test case`);
-            continue;
-          }
-          try {
-            const res = await runSingleTest({ runner, test, variant, opts });
-            if (res.status === 'pass') {
-              passed += 1;
-              fileReport.summary.passed += 1;
-              fileReport.cases.push({
-                testName,
-                variant,
-                status: 'pass',
-                durationMs: Date.now() - started
-              });
-            } else {
+      for (const backend of opts.backends) {
+        for (const variant of opts.variants) {
+          console.log(`[RUN] backend=${backend} variant=${variant}`);
+          for (let testIndex = 0; testIndex < tests.length; testIndex += 1) {
+            const test = tests[testIndex];
+            const testName = test?.name ?? `[unnamed-${testIndex}]`;
+            const started = Date.now();
+            if (!test || typeof test !== 'object' || !test.graph) {
               skipped += 1;
               fileReport.summary.skipped += 1;
               fileReport.cases.push({
                 testName,
+                backend,
                 variant,
                 status: 'skip',
-                reason: res.reason,
+                reason: 'invalid extracted test case',
+                durationMs: 0
+              });
+              console.log(`  - SKIP ${testName}: invalid extracted test case`);
+              continue;
+            }
+            try {
+              const res = await runSingleTest({ runner, test, backend, variant, opts });
+              if (res.status === 'pass') {
+                passed += 1;
+                fileReport.summary.passed += 1;
+                fileReport.cases.push({
+                  testName,
+                  backend,
+                  variant,
+                  status: 'pass',
+                  durationMs: Date.now() - started
+                });
+              } else {
+                skipped += 1;
+                fileReport.summary.skipped += 1;
+                fileReport.cases.push({
+                  testName,
+                  backend,
+                  variant,
+                  status: 'skip',
+                  reason: res.reason,
+                  durationMs: Date.now() - started
+                });
+                console.log(`  - SKIP ${testName}: ${res.reason}`);
+              }
+            } catch (err) {
+              failed += 1;
+              fileReport.summary.failed += 1;
+              const msg = `${path.basename(file)} :: ${backend}/${variant} :: ${testName} :: ${err.message}`;
+              failures.push(msg);
+              fileReport.cases.push({
+                testName,
+                backend,
+                variant,
+                status: 'fail',
+                error: err.message,
                 durationMs: Date.now() - started
               });
-              console.log(`  - SKIP ${testName}: ${res.reason}`);
-            }
-          } catch (err) {
-            failed += 1;
-            fileReport.summary.failed += 1;
-            const msg = `${path.basename(file)} :: ${variant} :: ${testName} :: ${err.message}`;
-            failures.push(msg);
-            fileReport.cases.push({
-              testName,
-              variant,
-              status: 'fail',
-              error: err.message,
-              durationMs: Date.now() - started
-            });
-            console.log(`  - FAIL ${testName}`);
-            if (opts.stopOnFail) {
-              halted = true;
-              break;
+              console.log(`  - FAIL ${testName}`);
+              if (isRunnerCrashError(err)) {
+                await runner.close();
+                runner = new RunnerClient({ runnerFeatures: opts.runnerFeatures ?? [] });
+                console.log('  - INFO restarted runner after backend crash');
+              }
+              if (opts.stopOnFail) {
+                halted = true;
+                break;
+              }
             }
           }
+          if (halted) break;
         }
         if (halted) break;
       }
@@ -363,7 +396,7 @@ async function main() {
     console.log(`HTML report written: ${opts.reportHtml}`);
   }
 
-  process.exit((failed > 0 || fatalError) && !opts.exitZero ? 1 : 0);
+  process.exitCode = (failed > 0 || fatalError) && !opts.exitZero ? 1 : 0;
 }
 
 main().catch((err) => {

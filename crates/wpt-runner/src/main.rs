@@ -2,15 +2,17 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::{self, BufRead, Write};
 
 use half::f16;
-use rustnn::executors::onnx::{OnnxInput, TensorData, run_onnx_with_inputs};
-use rustnn::{
-    ContextProperties, ConverterRegistry, GraphError, GraphInfo, GraphValidator,
-};
+#[cfg(all(target_os = "macos", feature = "backend-coreml"))]
+use rustnn::executors::coreml::{CoremlInput, CoremlOutput, run_coreml_with_inputs_with_weights};
+use rustnn::executors::onnx::{OnnxInput, OnnxOutputWithData, TensorData, run_onnx_with_inputs};
+#[cfg(any(feature = "backend-trtx", feature = "backend-trtx-mock"))]
+use rustnn::executors::trtx::{TrtxInput, TrtxOutputWithData, run_trtx_with_inputs};
+use rustnn::graph::{DataType, to_dimension_vector};
+use rustnn::{ContextProperties, ConverterRegistry, GraphError, GraphInfo, GraphValidator};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 use webnn_graph::ast::GraphJson;
-use rustnn::graph::{DataType, to_dimension_vector};
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
@@ -22,8 +24,37 @@ enum Request {
         #[serde(default)]
         expected_outputs: BTreeMap<String, ExpectedOutput>,
         #[serde(default)]
-        context_options: Value,
+        context_options: ContextOptions,
     },
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct ContextOptions {
+    #[serde(default)]
+    backend: Option<String>,
+    #[serde(rename = "deviceType", default)]
+    device_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Backend {
+    Onnx,
+    Coreml,
+    Trtx,
+}
+
+impl Backend {
+    fn from_context(options: &ContextOptions) -> Result<Self, RunnerError> {
+        let selected = options.backend.as_deref().unwrap_or("onnx");
+        match selected.trim().to_ascii_lowercase().as_str() {
+            "" | "onnx" | "ort" => Ok(Self::Onnx),
+            "coreml" => Ok(Self::Coreml),
+            "trtx" | "trt" | "tensorrt" => Ok(Self::Trtx),
+            other => Err(RunnerError::BadRequest(format!(
+                "unknown backend '{other}'. Supported: onnx, coreml, trtx"
+            ))),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -73,6 +104,15 @@ struct TensorDescriptorOut {
 struct ErrorPayload {
     kind: String,
     message: String,
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeOutput {
+    name: String,
+    shape: Vec<usize>,
+    data: Vec<f64>,
+    int64_data: Option<Vec<i64>>,
+    uint64_data: Option<Vec<u64>>,
 }
 
 #[derive(Debug, Error)]
@@ -225,6 +265,180 @@ fn to_tensor_data(
     }
 }
 
+#[cfg(any(feature = "backend-trtx", feature = "backend-trtx-mock"))]
+fn tensor_data_to_le_bytes(data: TensorData) -> Vec<u8> {
+    match data {
+        TensorData::Float32(values) => values.into_iter().flat_map(f32::to_le_bytes).collect(),
+        TensorData::Float16(values) => values.into_iter().flat_map(u16::to_le_bytes).collect(),
+        TensorData::Int8(values) => values.into_iter().map(|v| v as u8).collect(),
+        TensorData::Uint8(values) => values,
+        TensorData::Int32(values) => values.into_iter().flat_map(i32::to_le_bytes).collect(),
+        TensorData::Uint32(values) => values.into_iter().flat_map(u32::to_le_bytes).collect(),
+        TensorData::Int64(values) => values.into_iter().flat_map(i64::to_le_bytes).collect(),
+        TensorData::Uint64(values) => values.into_iter().flat_map(u64::to_le_bytes).collect(),
+    }
+}
+
+#[cfg(all(target_os = "macos", feature = "backend-coreml"))]
+fn to_f32_values(descriptor: &TensorDescriptor, data: &[Value]) -> Result<Vec<f32>, RunnerError> {
+    let normalized = normalize_input_values(descriptor, data)?;
+    normalized.iter().map(parse_f32).collect()
+}
+
+fn onnx_outputs_to_runtime(outputs: Vec<OnnxOutputWithData>) -> Vec<RuntimeOutput> {
+    outputs
+        .into_iter()
+        .map(|output| RuntimeOutput {
+            name: output.name,
+            shape: output.shape,
+            data: output.data,
+            int64_data: output.int64_data,
+            uint64_data: output.uint64_data,
+        })
+        .collect()
+}
+
+#[cfg(all(target_os = "macos", feature = "backend-coreml"))]
+fn coreml_output_shape_to_usize(shape: &[i64]) -> Result<Vec<usize>, RunnerError> {
+    shape
+        .iter()
+        .map(|&dim| {
+            if dim < 0 {
+                return Err(RunnerError::RuntimeExecution(format!(
+                    "coreml output shape contains negative dimension: {shape:?}"
+                )));
+            }
+            Ok(dim as usize)
+        })
+        .collect()
+}
+
+#[cfg(all(target_os = "macos", feature = "backend-coreml"))]
+fn coreml_outputs_to_runtime(
+    outputs: Vec<CoremlOutput>,
+) -> Result<Vec<RuntimeOutput>, RunnerError> {
+    outputs
+        .into_iter()
+        .map(|output| {
+            let shape = coreml_output_shape_to_usize(&output.shape)?;
+            let data = output
+                .data
+                .into_iter()
+                .map(|v| v as f64)
+                .collect::<Vec<_>>();
+            Ok(RuntimeOutput {
+                name: output.name,
+                shape,
+                data,
+                int64_data: None,
+                uint64_data: None,
+            })
+        })
+        .collect()
+}
+
+#[cfg(any(feature = "backend-trtx", feature = "backend-trtx-mock"))]
+fn read_le_chunks<const N: usize>(bytes: &[u8]) -> Result<Vec<[u8; N]>, RunnerError> {
+    if bytes.len() % N != 0 {
+        return Err(RunnerError::RuntimeExecution(format!(
+            "invalid tensor byte length {} for element width {}",
+            bytes.len(),
+            N
+        )));
+    }
+
+    Ok(bytes
+        .chunks_exact(N)
+        .map(|chunk| {
+            let mut arr = [0u8; N];
+            arr.copy_from_slice(chunk);
+            arr
+        })
+        .collect())
+}
+
+#[cfg(any(feature = "backend-trtx", feature = "backend-trtx-mock"))]
+fn trtx_output_to_runtime(output: TrtxOutputWithData) -> Result<RuntimeOutput, RunnerError> {
+    let data_type = output.data_type.to_ascii_lowercase();
+    let (data, int64_data, uint64_data) = match data_type.as_str() {
+        "float32" => {
+            let values = read_le_chunks::<4>(&output.data)?
+                .into_iter()
+                .map(|b| f32::from_le_bytes(b) as f64)
+                .collect::<Vec<_>>();
+            (values, None, None)
+        }
+        "float16" => {
+            let values = read_le_chunks::<2>(&output.data)?
+                .into_iter()
+                .map(|b| f16::from_bits(u16::from_le_bytes(b)).to_f32() as f64)
+                .collect::<Vec<_>>();
+            (values, None, None)
+        }
+        "int8" => {
+            let values = output
+                .data
+                .iter()
+                .map(|b| (*b as i8) as f64)
+                .collect::<Vec<_>>();
+            (values, None, None)
+        }
+        "uint8" | "bool" => {
+            let values = output.data.iter().map(|b| *b as f64).collect::<Vec<_>>();
+            (values, None, None)
+        }
+        "int32" => {
+            let values = read_le_chunks::<4>(&output.data)?
+                .into_iter()
+                .map(|b| i32::from_le_bytes(b) as f64)
+                .collect::<Vec<_>>();
+            (values, None, None)
+        }
+        "uint32" => {
+            let values = read_le_chunks::<4>(&output.data)?
+                .into_iter()
+                .map(|b| u32::from_le_bytes(b) as f64)
+                .collect::<Vec<_>>();
+            (values, None, None)
+        }
+        "int64" => {
+            let values = read_le_chunks::<8>(&output.data)?
+                .into_iter()
+                .map(i64::from_le_bytes)
+                .collect::<Vec<_>>();
+            (
+                values.iter().map(|v| *v as f64).collect::<Vec<_>>(),
+                Some(values),
+                None,
+            )
+        }
+        "uint64" => {
+            let values = read_le_chunks::<8>(&output.data)?
+                .into_iter()
+                .map(u64::from_le_bytes)
+                .collect::<Vec<_>>();
+            (
+                values.iter().map(|v| *v as f64).collect::<Vec<_>>(),
+                None,
+                Some(values),
+            )
+        }
+        other => {
+            return Err(RunnerError::RuntimeExecution(format!(
+                "unsupported TensorRT output data type: {other}"
+            )));
+        }
+    };
+
+    Ok(RuntimeOutput {
+        name: output.name,
+        shape: output.shape,
+        data,
+        int64_data,
+        uint64_data,
+    })
+}
+
 fn cast_output_data(
     data: &[f64],
     int64_data: Option<&[i64]>,
@@ -321,10 +535,131 @@ fn classify_graph_error(err: &GraphError) -> RunnerError {
     let msg = err.to_string();
     if msg.contains("validation") || msg.contains("input") || msg.contains("output") {
         RunnerError::GraphValidation(msg)
-    } else if msg.contains("onnx") || msg.contains("convert") || msg.contains("conversion") {
+    } else if msg.contains("onnx")
+        || msg.contains("coreml")
+        || msg.contains("trtx")
+        || msg.contains("tensorrt")
+        || msg.contains("convert")
+        || msg.contains("conversion")
+    {
         RunnerError::GraphConversion(msg)
     } else {
         RunnerError::RuntimeExecution(msg)
+    }
+}
+
+fn execute_onnx_backend(
+    graph_info: &GraphInfo,
+    inputs: &BTreeMap<String, InputTensor>,
+) -> Result<Vec<RuntimeOutput>, RunnerError> {
+    let converted = ConverterRegistry::with_defaults()
+        .convert("onnx", graph_info)
+        .map_err(|e| RunnerError::GraphConversion(e.to_string()))?;
+
+    let mut onnx_inputs = Vec::with_capacity(inputs.len());
+    for (name, input) in inputs {
+        onnx_inputs.push(OnnxInput {
+            name: name.clone(),
+            shape: input.descriptor.shape.clone(),
+            data: to_tensor_data(&input.descriptor, &input.data)?,
+        });
+    }
+
+    let outputs =
+        run_onnx_with_inputs(&converted.data, onnx_inputs).map_err(|e| classify_graph_error(&e))?;
+    Ok(onnx_outputs_to_runtime(outputs))
+}
+
+#[cfg(all(target_os = "macos", feature = "backend-coreml"))]
+fn execute_coreml_backend(
+    graph_info: &GraphInfo,
+    inputs: &BTreeMap<String, InputTensor>,
+) -> Result<Vec<RuntimeOutput>, RunnerError> {
+    let converted = ConverterRegistry::with_defaults()
+        .convert("coreml", graph_info)
+        .map_err(|e| RunnerError::GraphConversion(e.to_string()))?;
+
+    let mut coreml_inputs = Vec::with_capacity(inputs.len());
+    for (name, input) in inputs {
+        coreml_inputs.push(CoremlInput {
+            name: name.clone(),
+            shape: input.descriptor.shape.clone(),
+            data: to_f32_values(&input.descriptor, &input.data)?,
+        });
+    }
+
+    let attempts = run_coreml_with_inputs_with_weights(
+        &converted.data,
+        converted.weights_data.as_deref(),
+        coreml_inputs,
+    )
+    .map_err(|e| classify_graph_error(&e))?;
+
+    let outputs = attempts
+        .into_iter()
+        .find_map(|attempt| attempt.result.ok())
+        .ok_or_else(|| {
+            RunnerError::RuntimeExecution(
+                "coreml runtime failed: all compute unit attempts failed".to_string(),
+            )
+        })?;
+
+    coreml_outputs_to_runtime(outputs)
+}
+
+#[cfg(not(all(target_os = "macos", feature = "backend-coreml")))]
+fn execute_coreml_backend(
+    _graph_info: &GraphInfo,
+    _inputs: &BTreeMap<String, InputTensor>,
+) -> Result<Vec<RuntimeOutput>, RunnerError> {
+    Err(RunnerError::RuntimeExecution(
+        "backend 'coreml' is unavailable; rebuild runner with feature backend-coreml on macOS"
+            .to_string(),
+    ))
+}
+
+#[cfg(any(feature = "backend-trtx", feature = "backend-trtx-mock"))]
+fn execute_trtx_backend(
+    graph_info: &GraphInfo,
+    inputs: &BTreeMap<String, InputTensor>,
+) -> Result<Vec<RuntimeOutput>, RunnerError> {
+    let converted = ConverterRegistry::with_defaults()
+        .convert("trtx", graph_info)
+        .map_err(|e| RunnerError::GraphConversion(e.to_string()))?;
+
+    let mut trtx_inputs = Vec::with_capacity(inputs.len());
+    for (name, input) in inputs {
+        trtx_inputs.push(TrtxInput {
+            name: name.clone(),
+            data: tensor_data_to_le_bytes(to_tensor_data(&input.descriptor, &input.data)?),
+        });
+    }
+
+    let outputs =
+        run_trtx_with_inputs(&converted.data, trtx_inputs).map_err(|e| classify_graph_error(&e))?;
+    outputs.into_iter().map(trtx_output_to_runtime).collect()
+}
+
+#[cfg(not(any(feature = "backend-trtx", feature = "backend-trtx-mock")))]
+fn execute_trtx_backend(
+    _graph_info: &GraphInfo,
+    _inputs: &BTreeMap<String, InputTensor>,
+) -> Result<Vec<RuntimeOutput>, RunnerError> {
+    Err(RunnerError::RuntimeExecution(
+        "backend 'trtx' is unavailable; rebuild runner with feature backend-trtx or backend-trtx-mock"
+            .to_string(),
+    ))
+}
+
+fn execute_backend(
+    backend: Backend,
+    graph_info: &GraphInfo,
+    inputs: &BTreeMap<String, InputTensor>,
+) -> Result<Vec<RuntimeOutput>, RunnerError> {
+    match backend {
+        Backend::Onnx => execute_onnx_backend(graph_info, inputs),
+        Backend::Coreml => execute_coreml_backend(graph_info, inputs),
+        Backend::Trtx => execute_trtx_backend(graph_info, inputs),
     }
 }
 
@@ -332,6 +667,7 @@ fn execute_graph(
     graph: GraphJson,
     inputs: BTreeMap<String, InputTensor>,
     expected_outputs: BTreeMap<String, ExpectedOutput>,
+    context_options: ContextOptions,
 ) -> Result<BTreeMap<String, OutputTensor>, RunnerError> {
     let graph_info = rustnn::webnn_json::from_graph_json(&graph)
         .map_err(|e| RunnerError::GraphValidation(e.to_string()))?;
@@ -344,23 +680,9 @@ fn execute_graph(
         .validate()
         .map_err(|e| RunnerError::GraphValidation(e.to_string()))?;
 
-
-    let converted = ConverterRegistry::with_defaults()
-        .convert("onnx", &graph_info)
-        .map_err(|e| RunnerError::GraphConversion(e.to_string()))?;
-
-    let mut onnx_inputs = Vec::with_capacity(inputs.len());
-    for (name, input) in &inputs {
-        onnx_inputs.push(OnnxInput {
-            name: name.clone(),
-            shape: input.descriptor.shape.clone(),
-            data: to_tensor_data(&input.descriptor, &input.data)?,
-        });
-    }
-
-    let outputs =
-        run_onnx_with_inputs(&converted.data, onnx_inputs).map_err(|e| classify_graph_error(&e))?;
-
+    let _requested_device = context_options.device_type.as_deref().unwrap_or("cpu");
+    let backend = Backend::from_context(&context_options)?;
+    let outputs = execute_backend(backend, &graph_info, &inputs)?;
     let by_name: HashMap<String, _> = outputs.into_iter().map(|o| (o.name.clone(), o)).collect();
 
     let mut out = BTreeMap::new();
@@ -449,26 +771,23 @@ fn main() {
                 inputs,
                 expected_outputs,
                 context_options,
-            }) => {
-                let _ = context_options;
-                match execute_graph(graph, inputs, expected_outputs) {
-                    Ok(outputs) => Response {
-                        id,
-                        ok: true,
-                        outputs: Some(outputs),
-                        error: None,
-                    },
-                    Err(err) => Response {
-                        id,
-                        ok: false,
-                        outputs: None,
-                        error: Some(ErrorPayload {
-                            kind: error_kind(&err),
-                            message: err.to_string(),
-                        }),
-                    },
-                }
-            }
+            }) => match execute_graph(graph, inputs, expected_outputs, context_options) {
+                Ok(outputs) => Response {
+                    id,
+                    ok: true,
+                    outputs: Some(outputs),
+                    error: None,
+                },
+                Err(err) => Response {
+                    id,
+                    ok: false,
+                    outputs: None,
+                    error: Some(ErrorPayload {
+                        kind: error_kind(&err),
+                        message: err.to_string(),
+                    }),
+                },
+            },
             Err(err) => Response {
                 id: "unknown".to_string(),
                 ok: false,
