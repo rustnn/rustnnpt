@@ -16,6 +16,25 @@ function ulpDistanceF32(a, b) {
   return Math.abs(toOrdered(aBits) - toOrdered(bBits));
 }
 
+function float16Bits(v) {
+  const f16 = new Float16Array(1);
+  const u16 = new Uint16Array(f16.buffer);
+  f16[0] = v;
+  return u16[0];
+}
+
+/** ULP distance in IEEE binary16; required for float16 outputs (f32 ULP inflates ~1 f16 step to thousands). */
+function ulpDistanceF16(a, b) {
+  if (Object.is(a, b)) return 0;
+  if (!Number.isFinite(a) || !Number.isFinite(b)) {
+    return a === b ? 0 : Number.POSITIVE_INFINITY;
+  }
+  const aBits = float16Bits(a);
+  const bBits = float16Bits(b);
+  const toOrdered = (bits) => (bits & 0x8000 ? 0x8000 - (bits & 0x7fff) : bits + 0x8000);
+  return Math.abs(toOrdered(aBits) - toOrdered(bBits));
+}
+
 const OP_ULP = {
   add: 1,
   sub: 1,
@@ -105,7 +124,8 @@ export function assertOutputClose({ operatorName, outputName, expected, actual }
 
     const absDiff = Math.abs(a - e);
     const absTol = OP_ABS_TOL[operatorName]?.[dataType] ?? (dataType.startsWith('float') ? 1e-4 : 0);
-    const ulp = ulpDistanceF32(a, e);
+    const ulp =
+      dataType === 'float16' ? ulpDistanceF16(a, e) : ulpDistanceF32(a, e);
 
     if (absDiff > absTol && ulp > ulpTol) {
       throw new Error(
