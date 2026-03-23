@@ -109,7 +109,11 @@ export function assertOutputClose({ operatorName, outputName, expected, actual }
     return;
   }
 
-  const ulpTol = OP_ULP[operatorName] ?? 4;
+  let ulpTol = OP_ULP[operatorName];
+  if (ulpTol === undefined) ulpTol = 4;
+  // Subgraphs use the last op for tolerance (e.g. conv2d + relu → relu). relu/reduce_* use 0 = "exact"
+  // for that op, but float16 error still comes from earlier ops; allow small f16 ULP in that case.
+  if (dataType === 'float16' && ulpTol === 0) ulpTol = 4;
   for (let i = 0; i < expectedData.length; i += 1) {
     const a = Number(actualData[i]);
     const e = Number(expectedData[i]);
