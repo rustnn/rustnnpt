@@ -20,6 +20,15 @@ function normalizeOpName(name) {
   return name;
 }
 
+// Pool2d-style ops use MLPool2dOptions; rustnn expects WebNN IDL camelCase (outputShapeRounding).
+const POOL2D_LIKE_OPS = new Set([
+  'averagePool2d',
+  'maxPool2d',
+  'l2Pool2d',
+  'globalAveragePool',
+  'globalMaxPool'
+]);
+
 // Option keys that are MLOperands (stored in options as indices, not pushed to inputs).
 // WebNN camelCase; matches option names from the API (e.g. recurrentBias, initialHiddenState).
 const OPTION_OPERAND_KEYS = {
@@ -41,7 +50,11 @@ function isOperandOption(opName, optKey) {
 }
 
 function normalizeOptionKey(opName, key) {
-  if (opName === 'cast' && key === 'type') return 'to';
+  const op = normalizeOpName(opName);
+  if (op === 'cast' && key === 'type') return 'to';
+  if (POOL2D_LIKE_OPS.has(op) && key === 'roundingType') {
+    return 'outputShapeRounding';
+  }
   return key;
 }
 
