@@ -1,18 +1,49 @@
-function float32Bits(v) {
-  const f32 = new Float32Array(1);
-  const u32 = new Uint32Array(f32.buffer);
-  f32[0] = v;
-  return u32[0];
+// IEEE float bits reinterpreted as integers for ordered ULP distance (see Hamming / ordering trick).
+const F32_SIGN_MASK = 0x8000_0000;
+/** Exponent + fraction: all bits except the sign bit. */
+const F32_NOT_SIGN_MASK = 0x7fff_ffff;
+const F16_SIGN_MASK = 0x8000;
+/** Exponent + fraction: all bits except the sign bit. */
+const F16_NOT_SIGN_MASK = 0x7fff;
+
+/** `f32` and `u32` share one 4-byte buffer; do not reuse concurrently across overlapping calls. */
+/** @param {number} v @param {{ f32: Float32Array, u32: Uint32Array }} scratch */
+function float32Bits(v, scratch) {
+  scratch.f32[0] = v;
+  return scratch.u32[0];
 }
 
-function ulpDistanceF32(a, b) {
+/** @param {number} a @param {number} b @param {{ f32: Float32Array, u32: Uint32Array }} scratch */
+function ulpDistanceF32(a, b, scratch) {
   if (Object.is(a, b)) return 0;
   if (!Number.isFinite(a) || !Number.isFinite(b)) {
     return a === b ? 0 : Number.POSITIVE_INFINITY;
   }
-  const aBits = float32Bits(a);
-  const bBits = float32Bits(b);
-  const toOrdered = (bits) => (bits & 0x80000000 ? 0x80000000 - (bits & 0x7fffffff) : bits + 0x80000000);
+  const aBits = float32Bits(a, scratch);
+  const bBits = float32Bits(b, scratch);
+  const toOrdered = (bits) =>
+    bits & F32_SIGN_MASK ? F32_SIGN_MASK - (bits & F32_NOT_SIGN_MASK) : bits + F32_SIGN_MASK;
+  return Math.abs(toOrdered(aBits) - toOrdered(bBits));
+}
+
+/** `f16` and `u16` share one 2-byte buffer; do not reuse concurrently across overlapping calls. */
+/** @param {number} v @param {{ f16: Float16Array, u16: Uint16Array }} scratch */
+function float16Bits(v, scratch) {
+  scratch.f16[0] = v;
+  return scratch.u16[0];
+}
+
+/** ULP distance in IEEE binary16; required for float16 outputs (f32 ULP inflates ~1 f16 step to thousands). */
+/** @param {number} a @param {number} b @param {{ f16: Float16Array, u16: Uint16Array }} scratch */
+function ulpDistanceF16(a, b, scratch) {
+  if (Object.is(a, b)) return 0;
+  if (!Number.isFinite(a) || !Number.isFinite(b)) {
+    return a === b ? 0 : Number.POSITIVE_INFINITY;
+  }
+  const aBits = float16Bits(a, scratch);
+  const bBits = float16Bits(b, scratch);
+  const toOrdered = (bits) =>
+    bits & F16_SIGN_MASK ? F16_SIGN_MASK - (bits & F16_NOT_SIGN_MASK) : bits + F16_SIGN_MASK;
   return Math.abs(toOrdered(aBits) - toOrdered(bBits));
 }
 
@@ -90,7 +121,22 @@ export function assertOutputClose({ operatorName, outputName, expected, actual }
     return;
   }
 
-  const ulpTol = OP_ULP[operatorName] ?? 4;
+  let ulpTol = OP_ULP[operatorName];
+  if (ulpTol === undefined) ulpTol = 4;
+  // Subgraphs use the last op for tolerance (e.g. conv2d + relu → relu). relu/reduce_* use 0 = "exact"
+  // for that op, but float16 error still comes from earlier ops; allow small f16 ULP in that case.
+  if (dataType === 'float16' && ulpTol === 0) ulpTol = 4;
+
+  let f32BitScratch;
+  let f16BitScratch;
+  if (dataType === 'float16') {
+    const f16 = new Float16Array(1);
+    f16BitScratch = { f16, u16: new Uint16Array(f16.buffer) };
+  } else {
+    const f32 = new Float32Array(1);
+    f32BitScratch = { f32, u32: new Uint32Array(f32.buffer) };
+  }
+
   for (let i = 0; i < expectedData.length; i += 1) {
     const a = Number(actualData[i]);
     const e = Number(expectedData[i]);
@@ -105,7 +151,12 @@ export function assertOutputClose({ operatorName, outputName, expected, actual }
 
     const absDiff = Math.abs(a - e);
     const absTol = OP_ABS_TOL[operatorName]?.[dataType] ?? (dataType.startsWith('float') ? 1e-4 : 0);
-    const ulp = ulpDistanceF32(a, e);
+    let ulp;
+    if (dataType === 'float16') {
+      ulp = ulpDistanceF16(a, e, f16BitScratch);
+    } else {
+      ulp = ulpDistanceF32(a, e, f32BitScratch);
+    }
 
     if (absDiff > absTol && ulp > ulpTol) {
       throw new Error(
