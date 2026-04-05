@@ -57,6 +57,12 @@ const OP_ULP = {
   tanh: 16,
   softmax: 256,
   matmul: 512,
+  /**
+   * MAC-heavy; TRT/GPU vs CPU reference can exceed ~4e-4 abs and ~8k float32 ULP near 1.0
+   * for some layout/stride combinations while still matching for inference.
+   */
+  conv2d: 16384,
+  conv_transpose2d: 16384,
   exp: 4,
   log: 4,
   sqrt: 2,
@@ -74,7 +80,10 @@ const OP_ULP = {
 
 const OP_ABS_TOL = {
   cos: { float32: 2 ** -10, float16: 2 ** -7 },
-  sin: { float32: 2 ** -11, float16: 2 ** -7 }
+  sin: { float32: 2 ** -11, float16: 2 ** -7 },
+  /** Default float abs tol is 1e-4; TRTX conv can land ~4.5e-4 vs JS reference on element 0. */
+  conv2d: { float32: 5e-4, float16: 1e-2 },
+  conv_transpose2d: { float32: 5e-4, float16: 1e-2 }
 };
 
 function castActual(value, dataType) {

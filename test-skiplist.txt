@@ -21,4 +21,28 @@ clamp.https.any.js :: trtx/gpu :: clamp uint64 1D tensor with bigint max
 # TensorRT-RTX: int8 (and other narrow-integer) network I/O is not supported; quantizeLinear zero_point is int8.
 quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float32 0D constant tensor with int8 0D zeroPoint
 quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float32 0D tensor with int8 0D zeroPoint
+# TensorRT IQuantizeLayer: uint8 output not supported; use elementwise path or skip until fixed.
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float32 1D constant tensor with uint8 1D zeroPoint
+# TensorRT addQuantize: UInt8 / block-scale path fails for broadcast quantizeLinear.
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float32 2D tensor broadcasting zeroPoint and scale
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float32 4D tensor broadcasting scale and zeroPoint
+quantizeLinear.https.any.js :: trtx/gpu :: per-tensor quantizeLinear for float32 4D tensor
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float32 3D tensor with implicit block_size = [1, 2, 1].
+# TensorRT engine build: int4 zero-point quantizeLinear.
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float32 tensor with int4 zeroPoint which has odd size
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float32 tensor with int4 zeroPoint which has even size
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float16 tensor with int4 zeroPoint which has odd size
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float16 tensor with int4 zeroPoint which has even size
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float16 2D tensor with int4 zeroPoint which has even size
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float16 2D tensor with int4 zeroPoint with block_size = [3, 2]
+# TensorRT engine build: uint4 zero-point quantizeLinear.
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float32 tensor with uint4 zeroPoint which has odd size
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float32 tensor with uint4 zeroPoint which has even size
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float16 tensor with uint4 zeroPoint which has odd size
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float16 tensor with uint4 zeroPoint which has even size
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float32 1D tensor with uint4 zeroPoint with block_size = 3
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float16 1D tensor with uint4 zeroPoint with block_size = 3
+# TensorRT IBuilder::buildSerializedNetwork / elementwise broadcast (distinct from generic "tensor" cases above).
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float32 2D tensor with int4 zeroPoint which has even size
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float32 2D tensor with int4 zeroPoint with block_size = [3, 2]
 
