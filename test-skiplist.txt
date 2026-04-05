@@ -1,0 +1,24 @@
+# rustnnpt conformance: explicit skips (see README).
+# Format per line: <wpt-file> :: <backend>/<variant> :: <test name prefix or full name>
+# Lines starting with # are ignored. Test name matches if it equals the column or starts with it.
+#
+arg_min_max.https.any.js :: trtx/gpu :: argMin int8 4D tensor
+cast.https.any.js :: trtx/gpu :: cast int8 0D constant tensor to int32
+cast.https.any.js :: trtx/gpu :: cast int8 1D constant tensor to int32
+cast.https.any.js :: trtx/gpu :: cast int8 4D tensor to float32
+cast.https.any.js :: trtx/gpu :: cast int8 4D tensor to float16
+cast.https.any.js :: trtx/gpu :: cast int8 4D tensor to int32
+cast.https.any.js :: trtx/gpu :: cast int8 4D tensor to uint32
+cast.https.any.js :: trtx/gpu :: cast int8 4D tensor to int64
+cast.https.any.js :: trtx/gpu :: cast int8 4D tensor to uint8
+cast.https.any.js :: trtx/gpu :: cast uint8 4D tensor to float32
+cast.https.any.js :: trtx/gpu :: cast uint8 4D tensor to int32
+clamp.https.any.js :: trtx/gpu :: clamp int8 1D tensor
+clamp.https.any.js :: trtx/gpu :: clamp uint8 1D tensor
+clamp.https.any.js :: trtx/gpu :: clamp uint32 1D tensor
+clamp.https.any.js :: trtx/gpu :: clamp int64 1D tensor with bigint max
+clamp.https.any.js :: trtx/gpu :: clamp uint64 1D tensor with bigint max
+# TensorRT-RTX: int8 (and other narrow-integer) network I/O is not supported; quantizeLinear zero_point is int8.
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float32 0D constant tensor with int8 0D zeroPoint
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float32 0D tensor with int8 0D zeroPoint
+
