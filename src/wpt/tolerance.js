@@ -86,6 +86,34 @@ const OP_ABS_TOL = {
   conv_transpose2d: { float32: 5e-4, float16: 1e-2 }
 };
 
+/**
+ * Subgraphs pass `lastOp` as operatorName, but error may come from an earlier MAC-heavy op.
+ * Use the max ULP / abs tol across all ops in the graph (e.g. conv2d + relu → relu's 0 becomes conv2d's 16384).
+ * @param {string} primaryOp normalized op name (typically last node)
+ * @param {string[] | undefined} allOps normalized names of all operators in order
+ * @param {string} dataType
+ * @returns {{ ulpTol: number, absTol: number }}
+ */
+function mergedFloatTolerance(primaryOp, allOps, dataType) {
+  let ulpTol = OP_ULP[primaryOp];
+  if (ulpTol === undefined) ulpTol = 4;
+
+  let absTol =
+    OP_ABS_TOL[primaryOp]?.[dataType] ?? (dataType.startsWith('float') ? 1e-4 : 0);
+
+  if (Array.isArray(allOps)) {
+    for (const op of allOps) {
+      if (!op) continue;
+      const u = OP_ULP[op];
+      if (u !== undefined && u > ulpTol) ulpTol = u;
+      const at = OP_ABS_TOL[op]?.[dataType];
+      if (at !== undefined && at > absTol) absTol = at;
+    }
+  }
+
+  return { ulpTol, absTol };
+}
+
 function castActual(value, dataType) {
   if (dataType === 'float16') {
     // Runner returns uint16 bits for float16. Compare against expected numeric by converting expected to f32 tolerance path.
@@ -104,7 +132,13 @@ function castExpected(value, dataType) {
   return Number(value);
 }
 
-export function assertOutputClose({ operatorName, outputName, expected, actual }) {
+export function assertOutputClose({
+  operatorName,
+  graphOperatorNames,
+  outputName,
+  expected,
+  actual
+}) {
   const dataType = expected.descriptor.dataType;
   const expectedData = Array.isArray(expected.data) ? expected.data : [expected.data];
   const actualData = actual.data ?? [];
@@ -130,10 +164,8 @@ export function assertOutputClose({ operatorName, outputName, expected, actual }
     return;
   }
 
-  let ulpTol = OP_ULP[operatorName];
-  if (ulpTol === undefined) ulpTol = 4;
-  // Subgraphs use the last op for tolerance (e.g. conv2d + relu → relu). relu/reduce_* use 0 = "exact"
-  // for that op, but float16 error still comes from earlier ops; allow small f16 ULP in that case.
+  let { ulpTol, absTol } = mergedFloatTolerance(operatorName, graphOperatorNames, dataType);
+  // relu/reduce_* use 0 = "exact" for that op alone; float16 error still comes from earlier ops.
   if (dataType === 'float16' && ulpTol === 0) ulpTol = 4;
 
   let f32BitScratch;
@@ -159,7 +191,6 @@ export function assertOutputClose({ operatorName, outputName, expected, actual }
     }
 
     const absDiff = Math.abs(a - e);
-    const absTol = OP_ABS_TOL[operatorName]?.[dataType] ?? (dataType.startsWith('float') ? 1e-4 : 0);
     let ulp;
     if (dataType === 'float16') {
       ulp = ulpDistanceF16(a, e, f16BitScratch);

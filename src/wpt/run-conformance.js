@@ -300,6 +300,7 @@ async function runSingleTest({ runner, test, backend, variant, opts, testName })
   const outputs = await executeGraphResources(runner, graph, contextOptionsForRun(backend, variant));
   const normalizedGraph = buildGraphJson(graph);
   const lastOp = normalizedGraph.nodes[normalizedGraph.nodes.length - 1]?.op ?? 'unknown';
+  const graphOperatorNames = (graph.operators ?? []).map((o) => normalizeOpName(o?.name ?? ''));
 
   try {
     for (const [name, expected] of Object.entries(graph.expectedOutputs ?? {})) {
@@ -309,6 +310,7 @@ async function runSingleTest({ runner, test, backend, variant, opts, testName })
       }
       assertOutputClose({
         operatorName: normalizeOpName(lastOp),
+        graphOperatorNames,
         outputName: name,
         expected,
         actual
