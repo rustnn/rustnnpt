@@ -75,7 +75,11 @@ const OP_ULP = {
   reduce_l2: 16,
   reduce_log_sum: 16,
   reduce_log_sum_exp: 32,
-  reduce_sum_square: 16
+  reduce_sum_square: 16,
+  /** float16 reduce/sqrt/mul chain (e.g. TRTX) can land ~6+ f16 ULP vs JS reference; default 4 is too tight. */
+  instance_normalization: 12,
+  /** float16 layer norm (scale/bias/shape broadcast) on TRTX can exceed default 4 f16 ULP (e.g. ~7 in all-options 4D). */
+  layer_normalization: 16
 };
 
 const OP_ABS_TOL = {
