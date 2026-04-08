@@ -1,0 +1,87 @@
+# rustnnpt conformance: explicit skips (see README).
+# Format per line: <wpt-file> :: <backend>/<variant> :: <test name prefix or full name>
+# Lines starting with # are ignored. Test name matches if it equals the column or starts with it.
+#
+arg_min_max.https.any.js :: trtx/gpu :: argMin int8 4D tensor
+cast.https.any.js :: trtx/gpu :: cast int8 0D constant tensor to int32
+cast.https.any.js :: trtx/gpu :: cast int8 1D constant tensor to int32
+cast.https.any.js :: trtx/gpu :: cast int8 4D tensor to float32
+cast.https.any.js :: trtx/gpu :: cast int8 4D tensor to float16
+cast.https.any.js :: trtx/gpu :: cast int8 4D tensor to int32
+cast.https.any.js :: trtx/gpu :: cast int8 4D tensor to uint32
+cast.https.any.js :: trtx/gpu :: cast int8 4D tensor to int64
+cast.https.any.js :: trtx/gpu :: cast int8 4D tensor to uint8
+cast.https.any.js :: trtx/gpu :: cast uint8 4D tensor to float32
+cast.https.any.js :: trtx/gpu :: cast uint8 4D tensor to int32
+clamp.https.any.js :: trtx/gpu :: clamp int8 1D tensor
+clamp.https.any.js :: trtx/gpu :: clamp uint8 1D tensor
+clamp.https.any.js :: trtx/gpu :: clamp uint32 1D tensor
+clamp.https.any.js :: trtx/gpu :: clamp int64 1D tensor with bigint max
+clamp.https.any.js :: trtx/gpu :: clamp uint64 1D tensor with bigint max
+# TensorRT-RTX: int8 (and other narrow-integer) network I/O is not supported; quantizeLinear zero_point is int8.
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float32 0D constant tensor with int8 0D zeroPoint
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float32 0D tensor with int8 0D zeroPoint
+# TensorRT IQuantizeLayer: uint8 output not supported; use elementwise path or skip until fixed.
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float32 1D constant tensor with uint8 1D zeroPoint
+# TensorRT addQuantize: UInt8 / block-scale path fails for broadcast quantizeLinear.
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float32 2D tensor broadcasting zeroPoint and scale
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float32 4D tensor broadcasting scale and zeroPoint
+quantizeLinear.https.any.js :: trtx/gpu :: per-tensor quantizeLinear for float32 4D tensor
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float32 3D tensor with implicit block_size = [1, 2, 1].
+# TensorRT engine build: int4 zero-point quantizeLinear.
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float32 tensor with int4 zeroPoint which has odd size
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float32 tensor with int4 zeroPoint which has even size
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float16 tensor with int4 zeroPoint which has odd size
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float16 tensor with int4 zeroPoint which has even size
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float16 2D tensor with int4 zeroPoint which has even size
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float16 2D tensor with int4 zeroPoint with block_size = [3, 2]
+# TensorRT engine build: uint4 zero-point quantizeLinear.
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float32 tensor with uint4 zeroPoint which has odd size
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float32 tensor with uint4 zeroPoint which has even size
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float16 tensor with uint4 zeroPoint which has odd size
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float16 tensor with uint4 zeroPoint which has even size
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float32 1D tensor with uint4 zeroPoint with block_size = 3
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float16 1D tensor with uint4 zeroPoint with block_size = 3
+# TensorRT IBuilder::buildSerializedNetwork / elementwise broadcast (distinct from generic "tensor" cases above).
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float32 2D tensor with int4 zeroPoint which has even size
+quantizeLinear.https.any.js :: trtx/gpu :: quantizeLinear float32 2D tensor with int4 zeroPoint with block_size = [3, 2]
+
+# dequantizeLinear trtx: Int4/Uint4 unsupported at conversion.
+dequantizeLinear.https.any.js :: trtx/gpu :: dequantizeLinear int4 1D tensor of even size with float32 1D scale
+dequantizeLinear.https.any.js :: trtx/gpu :: dequantizeLinear int4 1D tensor of odd size with float32 1D scale
+dequantizeLinear.https.any.js :: trtx/gpu :: dequantizeLinear int4 1D tensor of even size with float16 1D scale
+dequantizeLinear.https.any.js :: trtx/gpu :: dequantizeLinear int4 1D tensor of odd size with float16 1D scale
+dequantizeLinear.https.any.js :: trtx/gpu :: per-tensor dequantizeLinear for int4 4D tensor with float16 4D scale
+dequantizeLinear.https.any.js :: trtx/gpu :: per-tensor dequantizeLinear for int4 4D tensor with float32 4D scale
+dequantizeLinear.https.any.js :: trtx/gpu :: dequantizeLinear uint4 1D tensor of even size with float32 1D scale
+dequantizeLinear.https.any.js :: trtx/gpu :: dequantizeLinear uint4 1D tensor of odd size with float32 1D scale
+dequantizeLinear.https.any.js :: trtx/gpu :: dequantizeLinear uint4 4D tensor with broadcasting float32 4D scale and uint4 4D zeroPoint
+dequantizeLinear.https.any.js :: trtx/gpu :: dequantizeLinear uint4 3D tensor with float32 3D scale, block_size = [1, 1, 2]
+dequantizeLinear.https.any.js :: trtx/gpu :: dequantizeLinear uint4 1D tensor of even size with float16 1D scale
+dequantizeLinear.https.any.js :: trtx/gpu :: dequantizeLinear uint4 1D tensor of odd size with float16 1D scale
+dequantizeLinear.https.any.js :: trtx/gpu :: dequantizeLinear uint4 4D tensor with broadcasting float16 4D scale and uint4 4D zeroPoint
+dequantizeLinear.https.any.js :: trtx/gpu :: dequantizeLinear uint4 3D tensor with float16 3D scale, block_size = [1, 1, 2]
+# dequantizeLinear trtx: uint8 input / block paths — engine build fails.
+dequantizeLinear.https.any.js :: trtx/gpu :: dequantizeLinear uint8 1D constant tensor with float32 1D scale
+dequantizeLinear.https.any.js :: trtx/gpu :: dequantizeLinear uint8 1D tensor with float32 1D scale, implicit block_size = 2
+dequantizeLinear.https.any.js :: trtx/gpu :: dequantizeLinear uint8 1D tensor with float16 1D scale
+dequantizeLinear.https.any.js :: trtx/gpu :: dequantizeLinear uint8 1D tensor with float16 1D scale, implicit block_size = 2
+# TensorRT buildSerializedNetwork: per-tensor 0D int8 DQ + float32 0D scale.
+dequantizeLinear.https.any.js :: trtx/gpu :: dequantizeLinear int8 0D tensor with float32 0D scale
+# TensorRT buildSerializedNetwork: per-tensor 0D int8 DQ + float16 0D scale.
+dequantizeLinear.https.any.js :: trtx/gpu :: dequantizeLinear int8 0D tensor with float16 0D scale
+dequantizeLinear.https.any.js :: trtx/gpu :: dequantizeLinear int8 0D constant tensor with float16 0D scale
+# TensorRT buildSerializedNetwork: int8 4D DQ with broadcast float32 scale and int8 zeroPoint.
+dequantizeLinear.https.any.js :: trtx/gpu :: dequantizeLinear int8 4D tensor broadcasting float32 4D scale and int8 4D zeroPoint
+# TensorRT buildSerializedNetwork: int8 4D DQ with broadcast float16 scale and int8 zeroPoint.
+dequantizeLinear.https.any.js :: trtx/gpu :: dequantizeLinear int8 4D tensor broadcasting float16 4D scale and int8 4D zeroPoint
+# TensorRT buildSerializedNetwork: int8 2D block dequantizeLinear (block_size [3, 2]).
+dequantizeLinear.https.any.js :: trtx/gpu :: dequantizeLinear int8 2D tensor with float32 2D scale, block_size = [3, 2]
+dequantizeLinear.https.any.js :: trtx/gpu :: dequantizeLinear int8 2D tensor with float16 2D scale, block_size = [3, 2]
+# TensorRT IDequantizeLayer: int32 input not supported (API expects FP8/FP4/Int4/Int8 only).
+dequantizeLinear.https.any.js :: trtx/gpu :: dequantizeLinear int32 1D tensor with float32 1D scale
+dequantizeLinear.https.any.js :: trtx/gpu :: dequantizeLinear int32 1D tensor with float16 1D scale
+# TensorRT kDEQUANTIZE: scale from intermediate (non-constant) node fails layer creation.
+dequantizeLinear.https.any.js :: trtx/gpu :: dequantizeLinear with float32 3D scale as an intermediate node
+dequantizeLinear.https.any.js :: trtx/gpu :: dequantizeLinear with float16 3D scale as an intermediate node
+

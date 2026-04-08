@@ -95,6 +95,102 @@ function normalizeOptions(optionsObj) {
   return out;
 }
 
+function shapeElementCount(shape) {
+  if (!shape || shape.length === 0) return 1;
+  return shape.reduce((a, b) => a * b, 1);
+}
+
+function parseNumericLoose(v) {
+  if (typeof v === 'number') return v;
+  if (typeof v === 'bigint') return Number(v);
+  if (typeof v === 'string') {
+    const t = v.trim();
+    if (t === 'NaN') return NaN;
+    if (t === 'Infinity' || t === '+Infinity') return Infinity;
+    if (t === '-Infinity') return -Infinity;
+    const noN = t.endsWith('n') ? t.slice(0, -1) : t;
+    return Number(noN);
+  }
+  return Number(v);
+}
+
+/**
+ * Pack tensor values to little-endian bytes for rustnn ConstInit::InlineBytes / webnn-graph-json.
+ * @param {{ descriptor: { dataType: string, shape: number[] }, data?: unknown }} input
+ * @returns {number[]}
+ */
+function packConstantInlineBytes(input) {
+  const dt = input.descriptor.dataType;
+  const shape = input.descriptor.shape ?? [];
+  const n = Math.max(1, shapeElementCount(shape));
+  let raw = input.data;
+  if (raw == null || (Array.isArray(raw) && raw.length === 0)) {
+    raw = n === 1 ? [0] : new Array(n).fill(0);
+  }
+  const arr = Array.isArray(raw) ? raw : [raw];
+  const getNorm = (i) => normalizeValue(arr.length === 1 ? arr[0] : arr[i]);
+
+  switch (dt) {
+    case 'float32': {
+      const ta = new Float32Array(n);
+      for (let i = 0; i < n; i++) ta[i] = parseNumericLoose(getNorm(i));
+      return [...new Uint8Array(ta.buffer)];
+    }
+    case 'float16': {
+      const ta = new Float16Array(n);
+      for (let i = 0; i < n; i++) ta[i] = parseNumericLoose(getNorm(i));
+      return [...new Uint8Array(ta.buffer)];
+    }
+    case 'int8': {
+      const ta = new Int8Array(n);
+      for (let i = 0; i < n; i++) ta[i] = parseNumericLoose(getNorm(i)) | 0;
+      return [...new Uint8Array(ta.buffer)];
+    }
+    case 'uint8':
+    case 'uint4':
+    case 'int4': {
+      const out = new Uint8Array(n);
+      for (let i = 0; i < n; i++) out[i] = parseNumericLoose(getNorm(i)) & 0xff;
+      return [...out];
+    }
+    case 'int32': {
+      const ta = new Int32Array(n);
+      for (let i = 0; i < n; i++) ta[i] = parseNumericLoose(getNorm(i)) | 0;
+      return [...new Uint8Array(ta.buffer)];
+    }
+    case 'uint32': {
+      const ta = new Uint32Array(n);
+      for (let i = 0; i < n; i++) ta[i] = parseNumericLoose(getNorm(i)) >>> 0;
+      return [...new Uint8Array(ta.buffer)];
+    }
+    case 'int64': {
+      const ta = new BigInt64Array(n);
+      for (let i = 0; i < n; i++) {
+        const v = getNorm(i);
+        ta[i] = typeof v === 'bigint' ? v : BigInt(Math.trunc(parseNumericLoose(v)));
+      }
+      return [...new Uint8Array(ta.buffer)];
+    }
+    case 'uint64': {
+      const ta = new BigUint64Array(n);
+      for (let i = 0; i < n; i++) {
+        const v = getNorm(i);
+        const bi =
+          typeof v === 'bigint'
+            ? v
+            : BigInt.asUintN(64, BigInt(Math.trunc(parseNumericLoose(v))));
+        ta[i] = bi;
+      }
+      return [...new Uint8Array(ta.buffer)];
+    }
+    default: {
+      const ta = new Float32Array(n);
+      for (let i = 0; i < n; i++) ta[i] = parseNumericLoose(getNorm(i));
+      return [...new Uint8Array(ta.buffer)];
+    }
+  }
+}
+
 export function buildGraphJson(graphResources) {
   const operandNames = new Set(Object.keys(graphResources.inputs ?? {}));
   const graph = {
@@ -115,9 +211,14 @@ export function buildGraphJson(graphResources) {
     };
 
     if (input.constant === true) {
-      // Keep constants inline as scalar/array values would require typed packing.
-      // For WPT execution we pass these as regular runtime inputs.
-      graph.inputs[name] = descriptor;
+      graph.consts[name] = {
+        dataType: input.descriptor.dataType,
+        shape: (input.descriptor.shape ?? []).map((d) => Number(d)),
+        init: {
+          kind: 'inlineBytes',
+          bytes: packConstantInlineBytes(input)
+        }
+      };
     } else {
       graph.inputs[name] = descriptor;
     }
@@ -202,6 +303,9 @@ export function buildGraphJson(graphResources) {
 export function buildRuntimeInputs(graphResources) {
   const inputs = {};
   for (const [name, input] of Object.entries(graphResources.inputs ?? {})) {
+    if (input.constant === true) {
+      continue;
+    }
     const data = Array.isArray(input.data) ? input.data : [input.data];
     inputs[name] = {
       descriptor: {

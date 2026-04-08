@@ -43,6 +43,16 @@ Report outputs:
 - `reports/conformance.json` (full structured execution data)
 - `reports/conformance.html` (styled dashboard with summary/failures/skips)
 
+### Explicit test skiplist
+
+Optional file `test-skiplist.txt` in the repo root lists cases to skip before execution (same shape as failure lines, without the trailing error). One entry per line:
+
+`arg_min_max.https.any.js :: trtx/gpu :: argMin int8 4D tensor`
+
+The third column is matched if the extracted WPT test name **equals** that string or **starts with** it (so shorter prefixes are ok). Lines beginning with `#` are comments.
+
+Override path with `--skiplist PATH` or `RUSTNNPT_TEST_SKIPLIST`. If `--skiplist` is set, the file must exist.
+
 ## Notes
 
 - Defaults are `backend=onnx` and `variant=cpu` when flags are omitted.

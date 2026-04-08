@@ -1,4 +1,4 @@
-import { buildExpectedOutputs, buildRuntimeInputs } from '../graph/build-graph-json.js';
+import { buildExpectedOutputs, buildGraphJson, buildRuntimeInputs } from '../graph/build-graph-json.js';
 
 function product(shape) {
   return shape.reduce((a, b) => a * b, 1);
@@ -219,41 +219,8 @@ export class MLGraphBuilder {
       }
     }
 
-    const graphJson = {
-      format: 'webnn-graph-json',
-      version: 2,
-      name: 'ml_builder_graph',
-      quantized: false,
-      inputs: {},
-      consts: {},
-      nodes: [],
-      outputs: {}
-    };
-
-    for (const [name, input] of Object.entries(graphResources.inputs)) {
-      graphJson.inputs[name] = input.descriptor;
-    }
-
-    for (const [index, op] of graphResources.operators.entries()) {
-      const inputs = [];
-      const options = {};
-      for (const arg of op.arguments) {
-        for (const [k, v] of Object.entries(arg)) {
-          if (k === 'options') {
-            Object.assign(options, v);
-          } else if (Array.isArray(v)) {
-            inputs.push(...v);
-          } else {
-            inputs.push(v);
-          }
-        }
-      }
-      graphJson.nodes.push({ id: `op_${index}`, op: op.name, inputs, options, outputs: [op.outputs] });
-    }
-
-    for (const name of Object.keys(graphResources.expectedOutputs)) {
-      graphJson.outputs[name] = name;
-    }
+    const graphJson = buildGraphJson(graphResources);
+    graphJson.name = 'ml_builder_graph';
 
     const expectedOutputs = buildExpectedOutputs(graphResources);
     return new MLGraph(graphJson, expectedOutputs);
