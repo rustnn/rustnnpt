@@ -583,8 +583,14 @@ fn execute_onnx_backend(
         });
     }
 
-    let outputs =
-        run_onnx_with_inputs(&converted.data, onnx_inputs).map_err(|e| classify_graph_error(&e))?;
+    let outputs = run_onnx_with_inputs(
+        &converted.data,
+        converted.weights_data.as_deref(),
+        onnx_inputs,
+        None,
+        None,
+    )
+    .map_err(|e| classify_graph_error(&e))?;
     Ok(onnx_outputs_to_runtime(outputs))
 }
 
@@ -742,8 +748,7 @@ fn execute_graph(
             if actual_len != expected_element_count {
                 return Err(RunnerError::RuntimeExecution(format!(
                     "output {name}: runtime returned {actual_len} elements but expected {} (shape {:?})",
-                    expected_element_count,
-                    expected.descriptor.shape
+                    expected_element_count, expected.descriptor.shape
                 )));
             }
             out.insert(
@@ -852,5 +857,3 @@ fn main() {
         }
     }
 }
-
-
