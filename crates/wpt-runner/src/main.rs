@@ -583,8 +583,12 @@ fn execute_onnx_backend(
         });
     }
 
-    let outputs =
-        run_onnx_with_inputs(&converted.data, onnx_inputs).map_err(|e| classify_graph_error(&e))?;
+    let outputs = run_onnx_with_inputs(
+        &converted.data,
+        converted.weights_data.as_deref(),
+        onnx_inputs,
+    )
+    .map_err(|e| classify_graph_error(&e))?;
     Ok(onnx_outputs_to_runtime(outputs))
 }
 
