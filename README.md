@@ -13,7 +13,7 @@ This is intentionally test-oriented and not a production WebNN runtime.
 
 ## Prerequisites
 
-- Node.js >= 20
+- Node.js >= 22
 - Rust toolchain
 - RustNN checked out at `../rustnn` relative to this repo (`/Users/tarek/Dev/rustnn`)
 

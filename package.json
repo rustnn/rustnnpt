@@ -16,6 +16,6 @@
     "check:runner:all": "cargo check --manifest-path crates/wpt-runner/Cargo.toml --no-default-features --features backend-onnx,backend-coreml,backend-trtx,backend-trtx-mock"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   }
 }
