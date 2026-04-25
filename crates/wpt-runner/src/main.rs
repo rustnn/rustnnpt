@@ -23,6 +23,8 @@ use half::f16;
 use rustnn::executors::coreml::{CoremlInput, CoremlOutput, run_coreml_with_inputs_with_weights};
 
 #[cfg(any(feature = "backend-trtx", feature = "backend-trtx-mock"))]
+use rustnn::converters::TrtxConverter;
+#[cfg(any(feature = "backend-trtx", feature = "backend-trtx-mock"))]
 use rustnn::executors::trtx::{TrtxInput, TrtxOutputWithData, run_trtx_with_inputs};
 
 use rustnn::executors::onnx::{OnnxInput, OnnxOutputWithData, TensorData, run_onnx_with_inputs};
@@ -376,7 +378,25 @@ fn read_le_chunks<const N: usize>(bytes: &[u8]) -> Result<Vec<[u8; N]>, RunnerEr
 }
 
 #[cfg(any(feature = "backend-trtx", feature = "backend-trtx-mock"))]
-fn trtx_output_to_runtime(output: TrtxOutputWithData) -> Result<RuntimeOutput, RunnerError> {
+fn trtx_binding_to_logical_name(graph_info: &GraphInfo, binding: &str) -> String {
+    const PREFIX: &str = "webnn_operand_";
+    if let Some(rest) = binding.strip_prefix(PREFIX) {
+        if let Ok(id) = rest.parse::<u32>() {
+            if let Some(op) = graph_info.operand(id) {
+                if let Some(ref n) = op.name {
+                    return n.clone();
+                }
+            }
+        }
+    }
+    binding.to_string()
+}
+
+#[cfg(any(feature = "backend-trtx", feature = "backend-trtx-mock"))]
+fn trtx_output_to_runtime(
+    output: TrtxOutputWithData,
+    logical_name: String,
+) -> Result<RuntimeOutput, RunnerError> {
     let data_type = output.data_type.to_ascii_lowercase();
     let (data, int64_data, uint64_data) = match data_type.as_str() {
         "float32" => {
@@ -449,7 +469,7 @@ fn trtx_output_to_runtime(output: TrtxOutputWithData) -> Result<RuntimeOutput, R
     };
 
     Ok(RuntimeOutput {
-        name: output.name,
+        name: logical_name,
         shape: output.shape,
         data,
         int64_data,
@@ -649,17 +669,40 @@ fn execute_trtx_backend(
         .convert("trtx", graph_info)
         .map_err(|e| RunnerError::GraphConversion(e.to_string()))?;
 
-    let mut trtx_inputs = Vec::with_capacity(inputs.len());
-    for (name, input) in inputs {
+    // Native WebNN->TRT engines bind tensors as `webnn_operand_{operand_id}` (see TrtxConverter), not
+    // WPT logical names like `quantizeLinearInput`.
+    let mut trtx_inputs = Vec::with_capacity(graph_info.input_operands.len());
+    for &op_id in &graph_info.input_operands {
+        let operand = graph_info.operand(op_id).ok_or_else(|| {
+            RunnerError::RuntimeExecution(format!(
+                "graph declares input operand id {op_id} but it is missing"
+            ))
+        })?;
+        let logical = operand.name.as_deref().ok_or_else(|| {
+            RunnerError::RuntimeExecution(format!(
+                "graph input operand {op_id} has no logical name for TRT binding"
+            ))
+        })?;
+        let input = inputs.get(logical).ok_or_else(|| {
+            RunnerError::RuntimeExecution(format!(
+                "missing runtime input `{logical}` required for TensorRT operand {op_id}"
+            ))
+        })?;
         trtx_inputs.push(TrtxInput {
-            name: name.clone(),
+            name: TrtxConverter::engine_binding_name(op_id),
             data: tensor_data_to_le_bytes(to_tensor_data(&input.descriptor, &input.data)?),
         });
     }
 
     let outputs =
         run_trtx_with_inputs(&converted.data, trtx_inputs).map_err(|e| classify_graph_error(&e))?;
-    outputs.into_iter().map(trtx_output_to_runtime).collect()
+    outputs
+        .into_iter()
+        .map(|o| {
+            let logical = trtx_binding_to_logical_name(graph_info, &o.name);
+            trtx_output_to_runtime(o, logical)
+        })
+        .collect()
 }
 
 #[cfg(not(any(feature = "backend-trtx", feature = "backend-trtx-mock")))]

@@ -70,6 +70,83 @@ function logFailureDetail(testName, graph, outputs) {
   console.error('---\n');
 }
 
+/**
+ * @typedef {{ file: string, backend: string, variant: string, testPrefix: string }} SkiplistEntry
+ */
+
+/**
+ * Parse one skiplist line: `file.js :: backend/variant :: test name...`
+ * @param {string} line
+ * @returns {SkiplistEntry | null}
+ */
+function parseSkiplistLine(line) {
+  const idx1 = line.indexOf(' :: ');
+  if (idx1 === -1) return null;
+  const idx2 = line.indexOf(' :: ', idx1 + 4);
+  if (idx2 === -1) return null;
+  const file = line.slice(0, idx1).trim();
+  const bv = line.slice(idx1 + 4, idx2).trim();
+  const testPrefix = line.slice(idx2 + 4).trim();
+  const slash = bv.indexOf('/');
+  if (slash === -1) return null;
+  const backend = bv.slice(0, slash).trim();
+  const variant = bv.slice(slash + 1).trim();
+  if (!file || !backend || !variant || !testPrefix) return null;
+  return { file, backend, variant, testPrefix };
+}
+
+/**
+ * @param {SkiplistEntry} entry
+ * @param {string} fileName basename of WPT file
+ * @param {string} backend
+ * @param {string} variant
+ * @param {string} testName
+ */
+function matchesSkiplistEntry(entry, fileName, backend, variant, testName) {
+  if (fileName !== entry.file) return false;
+  if (backend !== entry.backend || variant !== entry.variant) return false;
+  return testName === entry.testPrefix || testName.startsWith(entry.testPrefix);
+}
+
+/**
+ * Load explicit test skips from `test-skiplist.txt` (or a given path).
+ * @param {string} filePath
+ * @param {{ required?: boolean }} options
+ * @returns {Promise<SkiplistEntry[]>}
+ */
+async function loadTestSkiplist(filePath, { required = false } = {}) {
+  if (!existsSync(filePath)) {
+    if (required) {
+      throw new Error(`skiplist not found: ${filePath}`);
+    }
+    return [];
+  }
+  const text = await readFile(filePath, 'utf8');
+  /** @type {SkiplistEntry[]} */
+  const entries = [];
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const e = parseSkiplistLine(trimmed);
+    if (!e) {
+      console.warn(`[skiplist] ignoring malformed line: ${trimmed}`);
+      continue;
+    }
+    entries.push(e);
+  }
+  return entries;
+}
+
+/** @param {SkiplistEntry[]} entries */
+function skiplistReasonForTest(entries, fileName, backend, variant, testName) {
+  for (const e of entries) {
+    if (matchesSkiplistEntry(e, fileName, backend, variant, testName)) {
+      return `explicit skiplist: ${e.file} :: ${e.backend}/${e.variant} :: ${e.testPrefix}`;
+    }
+  }
+  return null;
+}
+
 function parseArgs(argv) {
   const opts = {
     wptDir: process.env.WPT_DIR ?? path.join(process.cwd(), '.cache', 'wpt'),
@@ -84,7 +161,11 @@ function parseArgs(argv) {
     stopOnFail: false,
     reportJson: null,
     reportHtml: null,
-    exitZero: false
+    exitZero: false,
+    /** Max failure lines printed after the run; Infinity = no cap. */
+    failureSummaryMax: 20,
+    /** If set, load this skiplist file (must exist). If null, use env or default path when present. */
+    skiplistPath: null
   };
 
   for (let i = 2; i < argv.length; i += 1) {
@@ -103,17 +184,30 @@ function parseArgs(argv) {
     else if (arg === '--report-json') opts.reportJson = argv[++i];
     else if (arg === '--report-html') opts.reportHtml = argv[++i];
     else if (arg === '--exit-zero') opts.exitZero = true;
+    else if (arg === '--all-failures') opts.failureSummaryMax = Number.POSITIVE_INFINITY;
+    else if (arg === '--failure-summary-limit') {
+      const n = Number(argv[++i]);
+      opts.failureSummaryMax =
+        !Number.isFinite(n) || n <= 0 ? Number.POSITIVE_INFINITY : Math.floor(n);
+    } else if (arg === '--skiplist') opts.skiplistPath = argv[++i];
     else if (arg === '--help') {
-      console.log('Usage: node src/wpt/run-conformance.js [--wpt-dir PATH] [--op NAME] [--file FILE] [--limit-tests N] [--limit-files N] [--backend onnx|coreml|trtx] [--backends LIST] [--variants cpu,gpu,npu] [--runner-features LIST] [--skip-unimplemented] [--stop-on-fail] [--report-json PATH] [--report-html PATH] [--exit-zero]');
+      console.log(
+        'Usage: node src/wpt/run-conformance.js [options]\n' +
+          '  [--wpt-dir PATH] [--op NAME] [--file FILE] [--limit-tests N] [--limit-files N]\n' +
+          '  [--backend onnx|coreml|trtx] [--backends LIST] [--variants cpu,gpu,npu]\n' +
+          '  [--runner-features LIST] [--skip-unimplemented] [--stop-on-fail]\n' +
+          '  [--report-json PATH] [--report-html PATH] [--exit-zero]\n' +
+          '  [--all-failures | --failure-summary-limit N]  (default: first 20 failures; N<=0 means all)\n' +
+          '  [--skiplist PATH]  (optional; default: ./test-skiplist.txt if present, or RUSTNNPT_TEST_SKIPLIST)\n' +
+          '  [--debug]'
+      );
+      process.exit(0);
     }
     else if (arg === '--debug') {
       process.env.RUSTNNPT_DEBUG = '2';
       process.env.RUSTNN_DEBUG = '2';
       // ONNX debug dump (when RUSTNN_DEBUG=2) writes to this folder
       process.env.RUSTNN_DEBUG_ONNX_DIR = process.env.RUSTNN_DEBUG_ONNX_DIR ?? 'C:\\git\\rustnn-workspace\\rustnnpt';
-    } else if (arg === '--help') {
-      console.log('Usage: node src/wpt/run-conformance.js [--wpt-dir PATH] [--op NAME] [--file FILE] [--limit-tests N] [--limit-files N] [--variants cpu,gpu,npu] [--skip-unimplemented] [--stop-on-fail | --no-stop-on-fail] [--report-json PATH] [--report-html PATH] [--exit-zero] [--debug]');
-      process.exit(0);
     }
   }
 
@@ -206,6 +300,7 @@ async function runSingleTest({ runner, test, backend, variant, opts, testName })
   const outputs = await executeGraphResources(runner, graph, contextOptionsForRun(backend, variant));
   const normalizedGraph = buildGraphJson(graph);
   const lastOp = normalizedGraph.nodes[normalizedGraph.nodes.length - 1]?.op ?? 'unknown';
+  const graphOperatorNames = (graph.operators ?? []).map((o) => normalizeOpName(o?.name ?? ''));
 
   try {
     for (const [name, expected] of Object.entries(graph.expectedOutputs ?? {})) {
@@ -215,6 +310,7 @@ async function runSingleTest({ runner, test, backend, variant, opts, testName })
       }
       assertOutputClose({
         operatorName: normalizeOpName(lastOp),
+        graphOperatorNames,
         outputName: name,
         expected,
         actual
@@ -243,7 +339,10 @@ function serializeOptions(opts) {
     stopOnFail: opts.stopOnFail,
     reportJson: opts.reportJson,
     reportHtml: opts.reportHtml,
-    exitZero: opts.exitZero
+    exitZero: opts.exitZero,
+    failureSummaryMax: numberOrNull(opts.failureSummaryMax),
+    skiplistResolvedPath: opts.skiplistResolvedPath ?? null,
+    skiplistEntryCount: opts.skiplistEntryCount ?? 0
   };
 }
 
@@ -260,6 +359,20 @@ async function writeReportFile(filePath, content) {
 
 async function main() {
   const opts = parseArgs(process.argv);
+
+  const defaultSkiplistPath = path.join(process.cwd(), 'test-skiplist.txt');
+  const skiplistExplicit = opts.skiplistPath;
+  const skiplistPath =
+    skiplistExplicit
+    ?? (process.env.RUSTNNPT_TEST_SKIPLIST
+      ? path.resolve(process.cwd(), process.env.RUSTNNPT_TEST_SKIPLIST)
+      : defaultSkiplistPath);
+  const skiplistEntries = await loadTestSkiplist(skiplistPath, { required: Boolean(skiplistExplicit) });
+  opts.skiplistResolvedPath = existsSync(skiplistPath) ? skiplistPath : null;
+  opts.skiplistEntryCount = skiplistEntries.length;
+  if (skiplistEntries.length > 0) {
+    console.log(`[skiplist] loaded ${skiplistEntries.length} entr${skiplistEntries.length === 1 ? 'y' : 'ies'} from ${skiplistPath}`);
+  }
 
   if (!existsSync(path.join(opts.wptDir, 'webnn'))) {
     console.error(`WPT not found at ${opts.wptDir}. Run: npm run test:wpt:fetch`);
@@ -370,6 +483,27 @@ async function main() {
               console.log(`  - SKIP ${testName}: invalid extracted test case`);
               continue;
             }
+            const skiplistReason = skiplistReasonForTest(
+              skiplistEntries,
+              fileReport.fileName,
+              backend,
+              variant,
+              testName
+            );
+            if (skiplistReason) {
+              skipped += 1;
+              fileReport.summary.skipped += 1;
+              fileReport.cases.push({
+                testName,
+                backend,
+                variant,
+                status: 'skip',
+                reason: skiplistReason,
+                durationMs: 0
+              });
+              console.log(`  - SKIP ${testName}: ${skiplistReason}`);
+              continue;
+            }
             try {
               const res = await runSingleTest({ runner, test, backend, variant, opts, testName });
               if (res.status === 'pass') {
@@ -448,8 +582,13 @@ async function main() {
   console.log('\n=== SUMMARY ===');
   console.log(`passed=${passed} failed=${failed} skipped=${skipped} passRate=${report.summary.passRatePct}%`);
   if (failures.length > 0) {
-    console.log('\nFirst failures:');
-    for (const line of failures.slice(0, 20)) {
+    const max = opts.failureSummaryMax;
+    const limit = !Number.isFinite(max) || max <= 0 ? failures.length : max;
+    const lines = failures.slice(0, limit);
+    const suffix =
+      lines.length < failures.length ? ` (showing ${lines.length} of ${failures.length})` : '';
+    console.log(`\nFailures${suffix}:`);
+    for (const line of lines) {
       console.log(`- ${line}`);
     }
   }
