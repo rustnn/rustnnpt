@@ -114,6 +114,44 @@ function parseNumericLoose(v) {
   return Number(v);
 }
 
+function calculateBytesPerElement(dt) {
+  switch (dt) {
+    case 'float32':
+    case 'int32':
+    case 'uint32':
+      return 4;
+    case 'float16':
+      return 2;
+    case 'int64':
+    case 'uint64':
+      return 8;
+    default:
+      return 1;
+  }
+}
+
+const LARGE_SCALAR_INLINE_BYTES_THRESHOLD = 8 * 1024 * 1024;
+
+function shapeByteSize(dt, shape) {
+  const n = Math.max(1, shapeElementCount(shape ?? []));
+  return n * calculateBytesPerElement(dt);
+}
+
+function constantRawLength(raw) {
+  if (Array.isArray(raw)) return raw.length;
+  return raw == null ? 0 : 1;
+}
+
+function shouldInlineConstant(input) {
+  if (input.constant !== true) return false;
+  const dt = input?.descriptor?.dataType ?? 'float32';
+  const shape = input?.descriptor?.shape ?? [];
+  const rawLen = constantRawLength(input.data);
+  const scalarFillLike = rawLen <= 1;
+  const estBytes = shapeByteSize(dt, shape);
+  return !(scalarFillLike && estBytes >= LARGE_SCALAR_INLINE_BYTES_THRESHOLD);
+}
+
 /**
  * Pack tensor values to little-endian bytes for rustnn ConstInit::InlineBytes / webnn-graph-json.
  * @param {{ descriptor: { dataType: string, shape: number[] }, data?: unknown }} input
@@ -127,6 +165,7 @@ function packConstantInlineBytes(input) {
   if (raw == null || (Array.isArray(raw) && raw.length === 0)) {
     raw = n === 1 ? [0] : new Array(n).fill(0);
   }
+
   const arr = Array.isArray(raw) ? raw : [raw];
   const getNorm = (i) => normalizeValue(arr.length === 1 ? arr[0] : arr[i]);
 
@@ -210,7 +249,7 @@ export function buildGraphJson(graphResources) {
       shape: input.descriptor.shape
     };
 
-    if (input.constant === true) {
+    if (shouldInlineConstant(input)) {
       graph.consts[name] = {
         dataType: input.descriptor.dataType,
         shape: (input.descriptor.shape ?? []).map((d) => Number(d)),
@@ -303,10 +342,11 @@ export function buildGraphJson(graphResources) {
 export function buildRuntimeInputs(graphResources) {
   const inputs = {};
   for (const [name, input] of Object.entries(graphResources.inputs ?? {})) {
-    if (input.constant === true) {
+    if (input.constant === true && shouldInlineConstant(input)) {
       continue;
     }
-    const data = Array.isArray(input.data) ? input.data : [input.data];
+    let data = Array.isArray(input.data) ? input.data : (input.data == null ? [0] : [input.data]);
+    if (data.length === 0) data = [0];
     inputs[name] = {
       descriptor: {
         dataType: input.descriptor.dataType,
