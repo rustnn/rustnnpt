@@ -23,7 +23,6 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 import { RunnerClient } from '../bridge/runner-client.js';
-import { buildGraphJson } from '../graph/build-graph-json.js';
 import { executeGraphResources } from '../shim/webnn-shim.js';
 import { extractTestsFromSource } from './extract-tests.js';
 import { renderConformanceHtmlReport } from './render-report-html.js';
@@ -298,8 +297,7 @@ async function runSingleTest({ runner, test, backend, variant, opts, testName })
   }
 
   const outputs = await executeGraphResources(runner, graph, contextOptionsForRun(backend, variant));
-  const normalizedGraph = buildGraphJson(graph);
-  const lastOp = normalizedGraph.nodes[normalizedGraph.nodes.length - 1]?.op ?? 'unknown';
+  const lastOp = normalizeOpName(graph?.operators?.[graph.operators.length - 1]?.name ?? 'unknown');
   const graphOperatorNames = (graph.operators ?? []).map((o) => normalizeOpName(o?.name ?? ''));
 
   try {
@@ -309,7 +307,7 @@ async function runSingleTest({ runner, test, backend, variant, opts, testName })
         throw new Error(`missing output: ${name}`);
       }
       assertOutputClose({
-        operatorName: normalizeOpName(lastOp),
+        operatorName: lastOp,
         graphOperatorNames,
         outputName: name,
         expected,
