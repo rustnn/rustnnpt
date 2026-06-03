@@ -128,13 +128,26 @@ export class RunnerClient {
 
     this.proc = spawn(cargoExecutable, cargoArgs, {
       cwd,
-      stdio: ['pipe', 'pipe', 'inherit'],
+      // Pipe stderr (instead of inherit) so we can capture the runner's crash
+      // output — panics / segfault messages — and surface it in the report.
+      stdio: ['pipe', 'pipe', 'pipe'],
       env,
       // Own process group so close() can SIGKILL the whole tree (cargo + the
       // wpt-runner child); otherwise a wedged runner orphans and keeps a core busy.
       detached: true
     });
     this.pending = new Map();
+    // Bounded tail of the runner's stderr, attached to the exit error for diagnosis.
+    this.stderrTail = '';
+
+    if (this.proc.stderr) {
+      this.proc.stderr.on('data', (chunk) => {
+        const text = chunk.toString();
+        // Keep it visible in the CI log as before, and remember the last ~4KB.
+        process.stderr.write(text);
+        this.stderrTail = (this.stderrTail + text).slice(-4096);
+      });
+    }
 
     const rl = createInterface({ input: this.proc.stdout });
     rl.on('line', (line) => {
@@ -159,7 +172,9 @@ export class RunnerClient {
     });
 
     this.proc.on('exit', (code, signal) => {
-      const err = new Error(`runner exited (code=${code}, signal=${signal})`);
+      const tail = this.stderrTail.trim();
+      const detail = tail ? ` :: runner stderr: ${tail.slice(-2000)}` : '';
+      const err = new Error(`runner exited (code=${code}, signal=${signal})${detail}`);
       for (const { reject, timer } of this.pending.values()) {
         if (timer) clearTimeout(timer);
         reject(err);
