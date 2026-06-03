@@ -108,8 +108,12 @@ function resolveBinary(binName) {
 }
 
 export class RunnerClient {
-  constructor({ manifestPath = 'crates/wpt-runner/Cargo.toml', cwd = process.cwd(), runnerFeatures = [] } = {}) {
+  constructor({ manifestPath = 'crates/wpt-runner/Cargo.toml', cwd = process.cwd(), runnerFeatures = [], timeoutMs = 60000 } = {}) {
     this.cwd = cwd;
+    // Per-request hard timeout. A graph that wedges the runner produces neither a
+    // response nor a process exit, so without this the whole run blocks forever.
+    // 0 / non-finite disables it.
+    this.timeoutMs = Number.isFinite(Number(timeoutMs)) && Number(timeoutMs) > 0 ? Number(timeoutMs) : 0;
     const features = Array.isArray(runnerFeatures)
       ? runnerFeatures.map((f) => String(f).trim()).filter(Boolean)
       : String(runnerFeatures ?? '').split(',').map((f) => f.trim()).filter(Boolean);
@@ -123,11 +127,12 @@ export class RunnerClient {
     const cargoExecutable = resolveBinary('cargo');
 
     this.proc = spawn(cargoExecutable, cargoArgs, {
-
-
       cwd,
       stdio: ['pipe', 'pipe', 'inherit'],
-      env
+      env,
+      // Own process group so close() can SIGKILL the whole tree (cargo + the
+      // wpt-runner child); otherwise a wedged runner orphans and keeps a core busy.
+      detached: true
     });
     this.pending = new Map();
 
@@ -143,6 +148,7 @@ export class RunnerClient {
       const waiter = this.pending.get(msg.id);
       if (!waiter) return;
       this.pending.delete(msg.id);
+      if (waiter.timer) clearTimeout(waiter.timer);
       if (msg.ok) {
         waiter.resolve(msg.outputs ?? {});
       } else {
@@ -154,7 +160,8 @@ export class RunnerClient {
 
     this.proc.on('exit', (code, signal) => {
       const err = new Error(`runner exited (code=${code}, signal=${signal})`);
-      for (const { reject } of this.pending.values()) {
+      for (const { reject, timer } of this.pending.values()) {
+        if (timer) clearTimeout(timer);
         reject(err);
       }
       this.pending.clear();
@@ -162,7 +169,8 @@ export class RunnerClient {
 
     this.proc.stdin.on('error', (err) => {
       const wrapped = new Error(`runner stdin error: ${err.message}`);
-      for (const { reject } of this.pending.values()) {
+      for (const { reject, timer } of this.pending.values()) {
+        if (timer) clearTimeout(timer);
         reject(wrapped);
       }
       this.pending.clear();
@@ -185,12 +193,25 @@ export class RunnerClient {
         reject(new Error(`runner exited before request dispatch (exitCode=${this.proc?.exitCode ?? 'unknown'})`));
         return;
       }
-      this.pending.set(id, { resolve, reject });
+      let timer = null;
+      if (this.timeoutMs > 0) {
+        timer = setTimeout(() => {
+          const waiter = this.pending.get(id);
+          if (!waiter) return;
+          this.pending.delete(id);
+          const error = new Error(`runner timed out after ${this.timeoutMs}ms`);
+          error.kind = 'RunnerTimeout';
+          waiter.reject(error);
+        }, this.timeoutMs);
+        if (typeof timer.unref === 'function') timer.unref();
+      }
+      this.pending.set(id, { resolve, reject, timer });
       this.proc.stdin.write(`${JSON.stringify(payload)}\n`, (err) => {
         if (!err) return;
         const waiter = this.pending.get(id);
         if (!waiter) return;
         this.pending.delete(id);
+        if (waiter.timer) clearTimeout(waiter.timer);
         waiter.reject(new Error(`failed to send request to runner: ${err.message}`));
       });
     });
@@ -198,7 +219,16 @@ export class RunnerClient {
 
   async close() {
     if (!this.proc || this.proc.killed) return;
-    this.proc.stdin.end();
-    this.proc.kill('SIGTERM');
+    try { this.proc.stdin.end(); } catch { /* already closed */ }
+    const pid = this.proc.pid;
+    try {
+      // Negative pid targets the whole process group (works because we spawned
+      // detached), so a wedged cargo + wpt-runner child both die. SIGKILL because
+      // a runner stuck in a tight loop may ignore SIGTERM.
+      process.kill(-pid, 'SIGKILL');
+    } catch {
+      // Windows / no process group: fall back to killing the cargo process alone.
+      try { this.proc.kill('SIGKILL'); } catch { /* already gone */ }
+    }
   }
 }

@@ -164,7 +164,11 @@ function parseArgs(argv) {
     /** Max failure lines printed after the run; Infinity = no cap. */
     failureSummaryMax: 20,
     /** If set, load this skiplist file (must exist). If null, use env or default path when present. */
-    skiplistPath: null
+    skiplistPath: null,
+    /** Per-test hard timeout (ms); a hung graph is failed and the runner respawned. 0 disables. */
+    testTimeoutMs: Number(process.env.RUSTNNPT_TEST_TIMEOUT_MS) > 0
+      ? Number(process.env.RUSTNNPT_TEST_TIMEOUT_MS)
+      : 60000
   };
 
   for (let i = 2; i < argv.length; i += 1) {
@@ -189,6 +193,10 @@ function parseArgs(argv) {
       opts.failureSummaryMax =
         !Number.isFinite(n) || n <= 0 ? Number.POSITIVE_INFINITY : Math.floor(n);
     } else if (arg === '--skiplist') opts.skiplistPath = argv[++i];
+    else if (arg === '--test-timeout-ms') {
+      const n = Number(argv[++i]);
+      opts.testTimeoutMs = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+    }
     else if (arg === '--help') {
       console.log(
         'Usage: node src/wpt/run-conformance.js [options]\n' +
@@ -198,6 +206,7 @@ function parseArgs(argv) {
           '  [--report-json PATH] [--report-html PATH] [--exit-zero]\n' +
           '  [--all-failures | --failure-summary-limit N]  (default: first 20 failures; N<=0 means all)\n' +
           '  [--skiplist PATH]  (optional; default: ./test-skiplist.txt if present, or RUSTNNPT_TEST_SKIPLIST)\n' +
+          '  [--test-timeout-ms N]  (per-test hard timeout; default 60000, 0 disables; env RUSTNNPT_TEST_TIMEOUT_MS)\n' +
           '  [--debug]'
       );
       process.exit(0);
@@ -285,6 +294,7 @@ function isRunnerCrashError(err) {
     || msg.includes('stream was destroyed')
     || msg.includes('failed to send request to runner')
     || msg.includes('runner stdin error')
+    || msg.includes('runner timed out')
     || msg.includes('EPIPE')
     || msg.includes('SIGTRAP');
 }
@@ -391,7 +401,7 @@ async function main() {
     process.exit(2);
   }
 
-  let runner = new RunnerClient({ runnerFeatures: opts.runnerFeatures ?? [] });
+  let runner = new RunnerClient({ runnerFeatures: opts.runnerFeatures ?? [], timeoutMs: opts.testTimeoutMs });
 
   let passed = 0;
   let failed = 0;
@@ -543,7 +553,7 @@ async function main() {
               console.log(`  - FAIL ${testName}`);
               if (isRunnerCrashError(err)) {
                 await runner.close();
-                runner = new RunnerClient({ runnerFeatures: opts.runnerFeatures ?? [] });
+                runner = new RunnerClient({ runnerFeatures: opts.runnerFeatures ?? [], timeoutMs: opts.testTimeoutMs });
                 console.log('  - INFO restarted runner after backend crash');
               }
               if (opts.stopOnFail) {
