@@ -77,7 +77,14 @@ function withOrtRuntimeEnv(cwd) {
 }
 
 function withCargoCheckCfgEnv(env) {
-  // objc macros still probe feature="cargo-clippy"; allow it to avoid noisy warnings.
+  // The objc/objc_exception crates (macOS only) probe feature="cargo-clippy",
+  // producing check-cfg warnings. Only macOS needs this flag. On other platforms
+  // those crates aren't built, so injecting RUSTFLAGS here would differ from the
+  // build step's flags and force `cargo run` to recompile the whole tree from
+  // scratch (deadly with CARGO_INCREMENTAL=0 in CI) — so leave RUSTFLAGS alone.
+  if (process.platform !== 'darwin') {
+    return env;
+  }
   const allowCargoClippy = '--check-cfg=cfg(feature,values("cargo-clippy"))';
   const existing = env.RUSTFLAGS ?? '';
   if (existing.includes('values("cargo-clippy")')) {
