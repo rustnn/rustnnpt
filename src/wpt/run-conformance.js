@@ -168,7 +168,12 @@ function parseArgs(argv) {
     /** Per-test hard timeout (ms); a hung graph is failed and the runner respawned. 0 disables. */
     testTimeoutMs: Number(process.env.RUSTNNPT_TEST_TIMEOUT_MS) > 0
       ? Number(process.env.RUSTNNPT_TEST_TIMEOUT_MS)
-      : 60000
+      : 60000,
+    /** Abort after this many runner crashes in a row with no passing test in between. 0 disables. */
+    maxRunnerCrashes: Number.isFinite(Number(process.env.RUSTNNPT_MAX_RUNNER_CRASHES))
+      && Number(process.env.RUSTNNPT_MAX_RUNNER_CRASHES) >= 0
+      ? Number(process.env.RUSTNNPT_MAX_RUNNER_CRASHES)
+      : 8
   };
 
   for (let i = 2; i < argv.length; i += 1) {
@@ -407,6 +412,10 @@ async function main() {
   let failed = 0;
   let skipped = 0;
   const failures = [];
+  // Circuit breaker: if the runner keeps crashing without ever completing a
+  // test, something is systemically broken (e.g. a bad build) — abort instead
+  // of crash-respawning through the entire corpus forever.
+  let consecutiveRunnerCrashes = 0;
   const startedAt = new Date().toISOString();
   const report = {
     meta: {
@@ -514,6 +523,8 @@ async function main() {
             }
             try {
               const res = await runSingleTest({ runner, test, backend, variant, opts, testName });
+              // The runner answered (pass or skip): it is healthy, reset the breaker.
+              consecutiveRunnerCrashes = 0;
               if (res.status === 'pass') {
                 passed += 1;
                 fileReport.summary.passed += 1;
@@ -552,9 +563,22 @@ async function main() {
               });
               console.log(`  - FAIL ${testName}`);
               if (isRunnerCrashError(err)) {
+                consecutiveRunnerCrashes += 1;
+                if (opts.maxRunnerCrashes > 0 && consecutiveRunnerCrashes >= opts.maxRunnerCrashes) {
+                  halted = true;
+                  fatalError = new Error(
+                    `runner crashed ${consecutiveRunnerCrashes} times in a row without ` +
+                    `completing a test — aborting (likely a broken runner build). Last error: ${err.message}`
+                  );
+                  console.error(`\n  - ABORT ${fatalError.message}`);
+                  break;
+                }
                 await runner.close();
                 runner = new RunnerClient({ runnerFeatures: opts.runnerFeatures ?? [], timeoutMs: opts.testTimeoutMs });
-                console.log('  - INFO restarted runner after backend crash');
+                console.log(`  - INFO restarted runner after backend crash (${consecutiveRunnerCrashes}/${opts.maxRunnerCrashes})`);
+              } else {
+                // A normal per-test failure, not a crash: the runner is alive.
+                consecutiveRunnerCrashes = 0;
               }
               if (opts.stopOnFail) {
                 halted = true;
@@ -600,7 +624,7 @@ async function main() {
       console.log(`- ${line}`);
     }
   }
-  if (halted) {
+  if (halted && !fatalError) {
     console.log('\nRun halted early due to --stop-on-fail.');
   }
   if (fatalError) {
