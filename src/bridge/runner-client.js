@@ -40,10 +40,10 @@ function findOrtLibDirs(baseDir) {
 function guessedOrtLibDirs(baseDir) {
   const root = path.join(baseDir, 'target', 'onnxruntime');
   const suffixes = [
-    'onnxruntime-linux-x64-1.23.2/lib',
-    'onnxruntime-linux-aarch64-1.23.2/lib',
-    'onnxruntime-osx-arm64-1.23.2/lib',
-    'onnxruntime-osx-x86_64-1.23.2/lib',
+    'onnxruntime-linux-x64-1.24.4/lib',
+    'onnxruntime-linux-aarch64-1.24.4/lib',
+    'onnxruntime-osx-arm64-1.24.4/lib',
+    'onnxruntime-osx-x86_64-1.24.4/lib',
     'onnxruntime-win-x64-1.23.2/lib'
   ];
   return suffixes.map((suffix) => path.join(root, suffix));

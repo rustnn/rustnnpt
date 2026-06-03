@@ -18,7 +18,9 @@ jobs:
   build-report:
     runs-on: ubuntu-latest
     env:
-      ORT_VERSION: "1.23.2"
+      # rustnn main pins ort 2.0.0-rc.12 with the api-24 feature, which requires
+      # ONNX Runtime 1.24.x at runtime; 1.23.x makes ort deadlock during init.
+      ORT_VERSION: "1.24.4"
     steps:
       - name: Checkout main
         uses: actions/checkout@v4
