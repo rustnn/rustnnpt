@@ -93,6 +93,16 @@ jobs:
           echo "LD_LIBRARY_PATH=$ORT_LIB_DIR:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
           echo "ORT_DYLIB_PATH=$ORT_DYLIB_FILE" >> "$GITHUB_ENV"
 
+      - name: Diagnose runner hang (temporary)
+        env:
+          RUST_LOG: debug
+          RUSTNN_DEBUG: "2"
+          RUST_BACKTRACE: full
+        run: |
+          echo "Running a single abs test with verbose logging to locate the hang..."
+          node src/wpt/run-conformance.js --op abs --limit-tests 1 --variants cpu \
+            --skip-unimplemented --test-timeout-ms 45000 --exit-zero || true
+
       - name: Generate conformance report
         run: |
           npm run test:wpt:report -- --variants cpu --skip-unimplemented --exit-zero || true

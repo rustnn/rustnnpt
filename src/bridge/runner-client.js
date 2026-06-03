@@ -221,7 +221,9 @@ export class RunnerClient {
           const waiter = this.pending.get(id);
           if (!waiter) return;
           this.pending.delete(id);
-          const error = new Error(`runner timed out after ${this.timeoutMs}ms`);
+          const tail = this.stderrTail.trim();
+          const detail = tail ? ` :: runner stderr: ${tail.slice(-2000)}` : '';
+          const error = new Error(`runner timed out after ${this.timeoutMs}ms${detail}`);
           error.kind = 'RunnerTimeout';
           waiter.reject(error);
         }, this.timeoutMs);
