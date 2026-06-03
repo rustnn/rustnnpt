@@ -11,7 +11,7 @@ backend-trtx = ["rustnn/trtx-runtime"]
 backend-trtx-mock = ["rustnn/trtx-runtime-mock"]
 
 [dependencies]
-rustnn = { path = "../../../rustnn", default-features = false }
+rustnn = { git = "https://github.com/rustnn/rustnn", branch = "main", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"

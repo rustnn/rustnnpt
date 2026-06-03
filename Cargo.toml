@@ -1,3 +1,9 @@
 [workspace]
 members = ["crates/wpt-runner"]
 resolver = "2"
+
+# rustnn depends on webnn-graph from crates.io, but wpt-runner uses git main.
+# Redirect the crates.io webnn-graph to git main so both share a single build
+# and the GraphJson types match (otherwise from_graph_json rejects the type).
+[patch.crates-io]
+webnn-graph = { git = "https://github.com/rustnn/webnn-graph", branch = "main" }
