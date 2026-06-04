@@ -31,7 +31,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          # node 24+ exposes Float16Array unflagged; node 22 only had it behind
+          # --js-float16array, so float16 tests failed with "Float16Array is not defined".
+          node-version: "24"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
