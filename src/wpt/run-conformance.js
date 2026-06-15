@@ -241,15 +241,8 @@ const SUPPORTED_DTYPES = new Set([
   'float32', 'float16', 'int8', 'uint8', 'int32', 'uint32', 'int64', 'uint64', 'int4', 'uint4'
 ]);
 
-// Keep this set aligned with rustnn's implementation-status docs.
+// Add snake_case op names here to skip tests when --skip-unimplemented is set.
 const UNIMPLEMENTED_OPS = new Set([
-  'is_nan',
-  'l2_pool2d',
-  // Intentionally deferred in rustnn.
-  'gru',
-  'gru_cell',
-  'lstm',
-  'lstm_cell'
 ]);
 
 function collectUnimplementedOps(test) {
